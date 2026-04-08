@@ -6,11 +6,35 @@ import argparse
 import sys
 import os
 
+from network_interface.client import IPCClient
 from battle.engine import Engine
 from tournaments.tournament_manager import TournamentManager
 from battle.scenario import Scenario
 from ia.registry import AI_REGISTRY
 global tps
+
+# 1. Initialisation standard du moteur AOE
+engine = Engine("stest1", "major_daft", "major_daft", view_type=2)
+engine.load_scenario() # 
+engine.initialize_ai() # 
+engine.initialize_units() #  - Remplit engine.units
+
+# 2. Configuration de l'équipe locale
+# Conseil : cela pourrait être un argument passé au script plus tard
+MY_TEAM = 'R' 
+
+# 3. Connexion au Hub C
+ipc = IPCClient()
+ipc.connect()
+
+# 4. Annonce des unités au réseau (Objectif V1.1)
+# On parcourt la liste des unités initialisées dans le moteur 
+for i, unit in enumerate(engine.units):
+    if unit.team == MY_TEAM: # 
+        x, y = unit.position # 
+        # Format du protocole : SPAWN:ID:TYPE:X:Y
+        msg = f"SPAWN:{i}:{unit.type}:{x}:{y}"
+        ipc.send_action(msg)
 
 if not os.path.exists("data/scenario"):
     os.mkdir("data/scenario")
