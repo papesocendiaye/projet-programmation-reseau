@@ -42,6 +42,9 @@ class Unit:
         self.time_until_next_attack = 0
         self.time_before_next_attack = self.attack_delay
         
+        #Réseaux
+        self.unid_id = ""
+        
     #charge le fichier units.json
     def load_unit_data(self):
         path = "data/units.json"
