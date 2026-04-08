@@ -1,28 +1,32 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "protocol.h" // On inclut le travail du groupe Liaison
+#include "protocol.h" 
 
 #ifdef _WIN32
     #include <winsock2.h>
     #include <ws2tcpip.h>
     #pragma comment(lib, "ws2_32.lib")
+    typedef int socklen_t;
 #else
     #include <unistd.h>
     #include <arpa/inet.h>
     #include <sys/socket.h>
+    #define INVALID_SOCKET -1
+    #define SOCKET_ERROR -1
+    typedef int SOCKET;
 #endif
 
 #define PORT 5000
 
 int main(int argc, char *argv[]) {
-    // 1. INITIALISATION RÉSEAU (Windows/Linux)
+    // 1. INITIALISATION RÉSEAU
 #ifdef _WIN32
     WSADATA wsaData;
-    WSAStartup(MAKEWORD(2, 2), &wsaData);
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) return 1;
 #endif
 
-    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in addr;
     addr.sin_family = AF_INET;
     addr.sin_port = htons(PORT);
@@ -32,49 +36,61 @@ int main(int argc, char *argv[]) {
     char raw_recv[MAX_BUFFER_SIZE];
 
     if (argc > 1) {
-        // --- MODE CLIENT ---
+        // --- MODE CLIENT (Envoi continu possible) ---
         addr.sin_addr.s_addr = inet_addr(argv[1]);
-        connect(sock, (struct sockaddr *)&addr, sizeof(addr));
+        if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) == SOCKET_ERROR) {
+            printf("Erreur de connexion.\n");
+            return 1;
+        }
         printf("Connecté au partenaire.\n");
 
-        // Exemple d'envoi utilisant le protocole du Membre 6
-        Message my_action = {1, 150, 200, ACTION_MOVE, "Soldier1"};
+        // NOTE POUR L'IA : Utiliser des IDs courts (ex: "U01") car target_id est limité à 16 chars
+        Message my_action = {1, 150, 200, ACTION_MOVE, "U01"};
         char to_send[MAX_BUFFER_SIZE];
-        serialize_message(&my_action, to_send, sizeof(to_send));
         
-        send(sock, to_send, strlen(to_send), 0);
-        printf("Message envoyé : %s", to_send);
+        // Simulation d'envoi de plusieurs messages rapides pour tester le buffer
+        for(int i=0; i<3; i++) {
+            serialize_message(&my_action, to_send, sizeof(to_send));
+            send(sock, to_send, strlen(to_send), 0);
+            printf("Message %d envoyé.\n", i+1);
+        }
 
     } else {
-        // --- MODE SERVEUR (P2P) ---
+        // --- MODE SERVEUR (Réception en boucle) ---
         addr.sin_addr.s_addr = INADDR_ANY;
         bind(sock, (struct sockaddr *)&addr, sizeof(addr));
         listen(sock, 3);
-        printf("En attente sur le port %d...\n", PORT);
+        printf("En attente sur le port %d (Mode Boucle Active)...\n", PORT);
 
-        int client_sock = accept(sock, NULL, NULL);
-        
-        // Réception avec le découpage du Membre 7
-        int bytes_received = recv(client_sock, raw_recv, MAX_BUFFER_SIZE - 1, 0);
-        if (bytes_received > 0) {
-            add_data(&net_buffer, raw_recv, bytes_received);
+        SOCKET client_sock = accept(sock, NULL, NULL);
+        if (client_sock != INVALID_SOCKET) {
             
-            char single_message[MAX_BUFFER_SIZE];
-            if (get_next_message(&net_buffer, single_message)) {
-                Message received_msg;
-                if (deserialize_message(single_message, &received_msg)) {
-                    printf("\n--- Message reçu et décodé ---\n");
-                    printf("Joueur: %d | Pos: %d,%d | Action: %d | Cible: %s\n", 
-                            received_msg.id_joueur, received_msg.pos_x, 
-                            received_msg.pos_y, received_msg.action, received_msg.target_id);
+            int bytes_received;
+            // BOUCLE DE RÉCEPTION : On ne s'arrête pas au premier message
+            while ((bytes_received = recv(client_sock, raw_recv, MAX_BUFFER_SIZE - 1, 0)) > 0) {
+                
+                // 1. On ajoute les données brutes au tampon
+                add_data(&net_buffer, raw_recv, bytes_received);
+                
+                // 2. On traite TOUS les messages complets actuellement dans le tampon
+                // (C'est ici qu'on gère le cas où TCP colle plusieurs messages)
+                char single_message[MAX_BUFFER_SIZE];
+                while (get_next_message(&net_buffer, single_message)) {
+                    Message received_msg;
+                    if (deserialize_message(single_message, &received_msg)) {
+                        printf("\n[LOG] Message décodé : Unité %s -> Action %d en (%d,%d)\n", 
+                               received_msg.target_id, received_msg.action, 
+                               received_msg.pos_x, received_msg.pos_y);
+                    }
                 }
             }
-        }
+            printf("\nPartenaire déconnecté.\n");
 #ifdef _WIN32
-        closesocket(client_sock);
+            closesocket(client_sock);
 #else
-        close(client_sock);
+            close(client_sock);
 #endif
+        }
     }
 
 #ifdef _WIN32
