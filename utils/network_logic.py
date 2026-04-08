@@ -1,4 +1,4 @@
-from battle.unit import P, C, K, L, S
+from battle.unit import Unit
 
 def traiter_message_reseau(msg, engine):
     data = msg.split(':')
@@ -9,7 +9,7 @@ def traiter_message_reseau(msg, engine):
 
     # --- CAS A : Apparition d'une unité distante ---
     if cmd == "SPAWN":
-        # Format : SPAWN:ID:TYPE:X:Y
+        # Format attendu : SPAWN:ID:TYPE:X:Y
         unite_id = data[1]
         unite_type = data[2]
         pos = (float(data[3]), float(data[4]))
@@ -18,19 +18,19 @@ def traiter_message_reseau(msg, engine):
         if any(hasattr(u, 'network_id') and u.network_id == unite_id for u in engine.units):
             return
 
-        # Mapping des types vers les classes de ton projet AOE
-        classes = {'P': P, 'C': C, 'K': K, 'L': L, 'S': S}
-        unit_class = classes.get(unite_type, P)
-
-        # On crée l'unité dans l'équipe adverse ('B' pour Blue par exemple)
-        new_unit = unit_class('B', pos)
-        new_unit.network_id = unite_id  # On lui injecte l'ID pour la retrouver plus tard
+        # Création de l'unité avec la vraie méthode de ton projet (get_by_type)
+        # On assigne arbitrairement l'équipe 'B' (Bleue) pour les unités distantes
+        new_unit = Unit().get_by_type(unite_type, 'B', pos)
+        
+        # On lui injecte l'ID réseau pour la suivre lors des prochains tours
+        new_unit.network_id = unite_id 
+        
         engine.units.append(new_unit)
-        print(f"[RESEAU] Spawn fantôme {unite_id} à {pos}")
+        print(f"[RESEAU] Spawn fantôme {unite_type} ({unite_id}) à la position {pos}")
 
     # --- CAS B : Mise à jour d'une unité (Position / Vie) ---
     elif cmd == "UPDATE":
-        # Format : UPDATE:ID:X:Y:HP
+        # Format attendu : UPDATE:ID:X:Y:HP
         unite_id = data[1]
         new_pos = (float(data[2]), float(data[3]))
         new_hp = int(data[4])
