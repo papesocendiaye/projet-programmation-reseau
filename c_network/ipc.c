@@ -1,0 +1,3 @@
+/*	ipc.c
+	communication avec Python
+*/
