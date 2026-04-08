@@ -22,6 +22,7 @@ class Unit:
         self.build_time = build_time
         self.reload_time = reload_time
         self.position = position  # (x,y)
+        self.network_id = None  # ID pour le réseau
         self.destination = None
         self.team = team
         self.squad = []
