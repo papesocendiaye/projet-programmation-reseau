@@ -38,15 +38,21 @@ for i, unit in enumerate(engine.units):
         ipc.send_action(msg)
 
 while True:
+    # 1. RÉCEPTION
     actions_reseau = ipc.get_pending_messages()
     for msg in actions_reseau:
         traiter_message_reseau(msg, engine)
 
+    # 2. CALCUL LOCAL
     engine.run_one_step()
 
+    # 3. ÉMISSION (Mise à jour des positions réelles)
     for unit in engine.units:
         if unit.team == MY_TEAM:
-            msg_upd = f"UPDATE:{unit.id}:{x}:{y}"
+            # On récupère les positions calculées par le moteur
+            curr_x, curr_y = unit.position
+            # On envoie : UPDATE:ID:X:Y:HP
+            msg_upd = f"UPDATE:{unit.id}:{curr_x}:{curr_y}:{unit.current_hp}"
             ipc.send_action(msg_upd)
 
 if not os.path.exists("data/scenario"):
