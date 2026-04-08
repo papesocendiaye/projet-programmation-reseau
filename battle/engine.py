@@ -24,6 +24,17 @@ def fix_string(string):
         str_void += char.lower()
     return str_void
 
+def run_one_step(self):
+    """Exécute une seule itération de la logique de jeu pour le mode réseau"""
+    if not self.game_pause:
+        self.process_turn()       # IA joue son tour 
+        self.update_units(1/60)   # Déplacement des unités 
+        self.update_projectiles() # Mise à jour des tirs 
+        self.check_victory()      # Vérification victoire 
+        self.current_turn += 1    # Incrémentation du tour 
+    
+    if self.view_type > 0:
+        self.update_view()        # Mise à jour graphique
 
 def get_key():
     """
