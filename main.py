@@ -11,6 +11,7 @@ from battle.engine import Engine
 from tournaments.tournament_manager import TournamentManager
 from battle.scenario import Scenario
 from ia.registry import AI_REGISTRY
+from utils.network_logic import traiter_message_reseau
 global tps
 
 # 1. Initialisation standard du moteur AOE
@@ -27,7 +28,7 @@ MY_TEAM = 'R'
 ipc = IPCClient()
 ipc.connect()
 
-# 4. Annonce des unités au réseau (Objectif V1.1)
+# 4. Annonce des unités au réseau
 # On parcourt la liste des unités initialisées dans le moteur 
 for i, unit in enumerate(engine.units):
     if unit.team == MY_TEAM: # 
@@ -35,6 +36,18 @@ for i, unit in enumerate(engine.units):
         # Format du protocole : SPAWN:ID:TYPE:X:Y
         msg = f"SPAWN:{i}:{unit.type}:{x}:{y}"
         ipc.send_action(msg)
+
+while True:
+    actions_reseau = ipc.get_pending_messages()
+    for msg in actions_reseau:
+        traiter_message_reseau(msg, engine)
+
+    engine.run_one_step()
+
+    for unit in engine.units:
+        if unit.team == MY_TEAM:
+            msg_upd = f"UPDATE:{unit.id}:{x}:{y}"
+            ipc.send_action(msg_upd)
 
 if not os.path.exists("data/scenario"):
     os.mkdir("data/scenario")
