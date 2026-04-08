@@ -1,0 +1,36 @@
+from dataclasses import dataclass
+from enum import IntEnum
+
+class ActionType(IntEnum):
+    MOVE = 0
+    ATTACK = 1
+    SPAWN = 2
+    REQ_OWNERSHIP = 3
+
+@dataclass
+class Message:
+    id_joueur: int
+    pos_x: int
+    pos_y: int
+    action: ActionType
+    target_id: str
+
+    def serialize(self) -> bytes:
+        """Transforme l'objet en bytes pour l'envoi via socket."""
+        msg_str = f"{self.id_joueur}|{self.pos_x}|{self.pos_y}|{self.action.value}|{self.target_id}\n"
+        return msg_str.encode('utf-8')
+
+    @classmethod
+    def deserialize(cls, data_str: str):
+        """Crée un objet Message à partir d'une chaîne reçue."""
+        parts = data_str.strip().split('|')
+        if len(parts) != 5:
+            raise ValueError(f"Format de message invalide : {data_str}")
+        
+        return cls(
+            id_joueur=int(parts[0]),
+            pos_x=int(parts[1]),
+            pos_y=int(parts[2]),
+            action=ActionType(int(parts[3])),
+            target_id=parts[4]
+        )
