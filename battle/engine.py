@@ -112,6 +112,12 @@ class Engine:
         self.turn_fps = 0
         self.time_turn = 0
         self.units = []
+        
+        # spawn
+        self.spawn_queue = []
+        self.spawn_interval = 0.15  # spawn une unite toutes les 150ms
+        self.time_since_last_spawn = 0.0
+        self.unit_id_counter = 0
 
     def initialize_units(self):
         """charge la liste d'unite"""
@@ -124,7 +130,70 @@ class Engine:
 
         if not self.tournaments: print(f"Loading scenario: {self.scenario_name}")
         self.game_map = Map()
-        Map.load(self.game_map, self.scenario_name)
+        #Map.load(self.game_map, self.scenario_name)
+        if self.tournaments:
+            # Mode tournoi: chargement classique instantané
+            Map.load(self.game_map, self.scenario_name)
+        else:
+            # Mode normal: chargement progressif
+            self.game_map.load_dimensions(self.scenario_name)
+            self.build_spawn_queue()
+
+    def build_spawn_queue(self):
+        """Construit la file de spawn progressive en alternant R et B"""
+        from battle.scenario import Scenario
+        _, scenario = Scenario().get_list_by_name(self.scenario_name)
+
+        red_units = []
+        blue_units = []
+
+        if "lanchester" in self.scenario_name:
+            for x, y, unit_type in scenario:
+                if x < self.game_map.p // 2:
+                    red_units.append((x, y, unit_type, 'R'))
+                else:
+                    blue_units.append((x, y, unit_type, 'B'))
+        else:
+            for x, y, unit_type in scenario:
+                red_units.append((x, y, unit_type, 'R'))
+                blue_units.append((self.game_map.p - x, y, unit_type, 'B'))
+
+        # Alterner R et B pour l'équité
+        self.spawn_queue = []
+        max_len = max(len(red_units), len(blue_units))
+        for i in range(max_len):
+            if i < len(red_units):
+                self.spawn_queue.append(red_units[i])
+            if i < len(blue_units):
+                self.spawn_queue.append(blue_units[i])
+
+    def process_spawns(self):
+        """Fait apparaitre les unités progressivement"""
+        if not self.spawn_queue:
+            return
+        self.time_since_last_spawn += 1.0 / 60.0
+        while self.time_since_last_spawn >= self.spawn_interval and self.spawn_queue:
+            self.time_since_last_spawn -= self.spawn_interval
+            x, y, unit_type, team = self.spawn_queue.pop(0)
+            self.game_map.add_unit(x, y, unit_type, team)
+            new_unit = self.game_map.get_unit(x, y)
+            if new_unit and new_unit not in self.units:
+                new_unit.direction = (0, 0)
+                # Assigner l'identifiant réseau unique
+                new_unit.unit_id = f"{team}_{unit_type}_{self.unit_id_counter}"
+                self.unit_id_counter += 1
+                self.units.append(new_unit)
+                self.ia1.initialize()
+                self.ia2.initialize()
+                
+                
+
+    def find_unit_by_id(self, unit_id):
+        """Trouve une unité par son identifiant réseau"""
+        for unit in self.units:
+            if unit.unit_id == unit_id:
+                return unit
+        return None
 
 
     def initialize_ai(self):
@@ -162,12 +231,12 @@ class Engine:
 
                 if (not self.tournaments) or self.view_type > 0:
                     self.initialize_view()
-                self.initialize_units()
+               # self.initialize_units()
 
                 self.is_running = True
                 self.star_execution_time = time.time()
 
-                randomize_order(self.units)
+              #  randomize_order(self.units)
 
                 # Boucle principale
                 self.game_loop()
@@ -209,6 +278,7 @@ class Engine:
             turn_start = time.time()
             if self.tournaments:
                 self.process_turn()
+                self.process_spawns()
                 self.check_victory()
                 self.current_turn += 1
                 self.update_units(1 / 60)
@@ -251,6 +321,7 @@ class Engine:
                         ##################################################################
 
                     self.process_turn()
+                    self.process_spawns()
                     # 1. Gérer les entrées
                     if self.view_type == 1:
                         self.handle_input()
