@@ -574,6 +574,7 @@ class Engine:
 
     def run_one_step(self):
         """Exécute une seule itération de la logique de jeu"""
+        self.turn_fps = 60
         if not self.game_pause:
             self.process_turn()       # L'IA prend ses décisions
             self.update_units(1/60)   # Les unités avancent
