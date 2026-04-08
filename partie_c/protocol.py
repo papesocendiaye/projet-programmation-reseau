@@ -23,13 +23,16 @@ class Message:
 
     @classmethod
     def deserialize(cls, data_str: str):
-        parts = data_str.strip().split('|')
+        parts = data_str.strip().split("|")
         if len(parts) != 5:
             return None
-        return cls(
-            id_joueur=int(parts[0]),
-            pos_x=int(parts[1]),
-            pos_y=int(parts[2]),
-            action=ActionType(int(parts[3])),
-            target_id=parts[4]
-        )
+        try:
+            return cls(
+                id_joueur=int(parts[0]),
+                pos_x=int(parts[1]),
+                pos_y=int(parts[2]),
+                action=ActionType(int(parts[3])),
+                target_id=parts[4],
+            )
+        except Exception:
+            return None
