@@ -5,6 +5,7 @@
 #include <string.h>
 
 #define MAX_BUFFER_SIZE 1024
+#define TARGET_ID_MAX 32
 
 typedef enum { 
     ACTION_MOVE, 
@@ -18,7 +19,7 @@ typedef struct {
     int pos_x;
     int pos_y;
     ActionType action;
-    char target_id[32]; // On a agrandi à 32 comme prévu
+    char target_id[TARGET_ID_MAX]; // On a agrandi à 32 comme prévu
 } Message;
 
 // Les fonctions de traduction restent les mêmes ! 
