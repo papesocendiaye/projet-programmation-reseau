@@ -24,18 +24,6 @@ def fix_string(string):
         str_void += char.lower()
     return str_void
 
-def run_one_step(self):
-    """Exécute une seule itération de la logique de jeu pour le mode réseau"""
-    if not self.game_pause:
-        self.process_turn()       # IA joue son tour 
-        self.update_units(1/60)   # Déplacement des unités 
-        self.update_projectiles() # Mise à jour des tirs 
-        self.check_victory()      # Vérification victoire 
-        self.current_turn += 1    # Incrémentation du tour 
-    
-    if self.view_type > 0:
-        self.update_view()        # Mise à jour graphique
-
 def get_key():
     """
     Retourne une touche pressée sans bloquer.
@@ -583,6 +571,19 @@ class Engine:
         }
 
         generate_report('lanchester', report_data, filename)
+
+    def run_one_step(self):
+        """Exécute une seule itération de la logique de jeu"""
+        if not self.game_pause:
+            self.process_turn()       # L'IA prend ses décisions
+            self.update_units(1/60)   # Les unités avancent
+            self.update_projectiles() # Les flèches volent
+            self.check_victory()      # On vérifie si quelqu'un a gagné
+            self.current_turn += 1
+        
+        # Si l'affichage est activé, on rafraîchit l'image
+        if self.view_type > 0:
+            self.update_view()
 
     def rapport_in_game(self):
         """Génère un rapport HTML détaillé de l'état actuel du jeu."""
