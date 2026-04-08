@@ -1,102 +1,69 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "protocol.h" 
+#include "protocol.h"
 
-//changement 
 #ifdef _WIN32
     #include <winsock2.h>
-    #include <ws2tcpip.h>
     #pragma comment(lib, "ws2_32.lib")
-    typedef int socklen_t;
 #else
     #include <unistd.h>
     #include <arpa/inet.h>
-    #include <sys/socket.h>
-    #define INVALID_SOCKET -1
-    #define SOCKET_ERROR -1
-    typedef int SOCKET;
 #endif
 
 #define PORT 5000
 
 int main(int argc, char *argv[]) {
-    // 1. INITIALISATION RÉSEAU
 #ifdef _WIN32
     WSADATA wsaData;
-    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) return 1;
+    WSAStartup(MAKEWORD(2, 2), &wsaData);
 #endif
 
-    SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
-    struct sockaddr_in addr;
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(PORT);
-
-    TCPBuffer net_buffer;
-    init_buffer(&net_buffer);
-    char raw_recv[MAX_BUFFER_SIZE];
+    // Changement : SOCK_DGRAM au lieu de SOCK_STREAM pour UDP
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    
+    struct sockaddr_in my_addr, other_addr;
+    socklen_t addr_len = sizeof(other_addr);
+    char buffer[MAX_BUFFER_SIZE];
 
     if (argc > 1) {
-        // --- MODE CLIENT (Envoi continu possible) ---
-        addr.sin_addr.s_addr = inet_addr(argv[1]);
-        if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) == SOCKET_ERROR) {
-            printf("Erreur de connexion.\n");
-            return 1;
-        }
-        printf("Connecté au partenaire.\n");
+        // --- MODE ENVOYEUR ---
+        memset(&other_addr, 0, sizeof(other_addr));
+        other_addr.sin_family = AF_INET;
+        other_addr.sin_port = htons(PORT);
+        other_addr.sin_addr.s_addr = inet_addr(argv[1]);
 
-        // NOTE POUR L'IA : Utiliser des IDs courts (ex: "U01") car target_id est limité à 16 chars
-        Message my_action = {1, 150, 200, ACTION_MOVE, "U01"};
-        char to_send[MAX_BUFFER_SIZE];
-        
-        // Simulation d'envoi de plusieurs messages rapides pour tester le buffer
-        for(int i=0; i<3; i++) {
-            serialize_message(&my_action, to_send, sizeof(to_send));
-            send(sock, to_send, strlen(to_send), 0);
-            printf("Message %d envoyé.\n", i+1);
-        }
+        Message msg = {1, 100, 200, ACTION_MOVE, "U37"};
+        serialize_message(&msg, buffer, sizeof(buffer));
+
+        sendto(sock, buffer, strlen(buffer), 0, (struct sockaddr*)&other_addr, addr_len);
+        printf("Paquet UDP envoyé vers %s\n", argv[1]);
 
     } else {
-        // --- MODE SERVEUR (Réception en boucle) ---
-        addr.sin_addr.s_addr = INADDR_ANY;
-        bind(sock, (struct sockaddr *)&addr, sizeof(addr));
-        listen(sock, 3);
-        printf("En attente sur le port %d (Mode Boucle Active)...\n", PORT);
+        // --- MODE RECEPTEUR ---
+        my_addr.sin_family = AF_INET;
+        my_addr.sin_port = htons(PORT);
+        my_addr.sin_addr.s_addr = INADDR_ANY;
 
-        SOCKET client_sock = accept(sock, NULL, NULL);
-        if (client_sock != INVALID_SOCKET) {
-            
-            int bytes_received;
-            // BOUCLE DE RÉCEPTION : On ne s'arrête pas au premier message
-            while ((bytes_received = recv(client_sock, raw_recv, MAX_BUFFER_SIZE - 1, 0)) > 0) {
-                
-                // 1. On ajoute les données brutes au tampon
-                add_data(&net_buffer, raw_recv, bytes_received);
-                
-                // 2. On traite TOUS les messages complets actuellement dans le tampon
-                // (C'est ici qu'on gère le cas où TCP colle plusieurs messages)
-                char single_message[MAX_BUFFER_SIZE];
-                while (get_next_message(&net_buffer, single_message)) {
-                    Message received_msg;
-                    if (deserialize_message(single_message, &received_msg)) {
-                        printf("\n[LOG] Message décodé : Unité %s -> Action %d en (%d,%d)\n", 
-                               received_msg.target_id, received_msg.action, 
-                               received_msg.pos_x, received_msg.pos_y);
-                    }
+        bind(sock, (struct sockaddr*)&my_addr, sizeof(my_addr));
+        printf("Écoute UDP sur le port %d...\n", PORT);
+
+        while (1) {
+            int len = recvfrom(sock, buffer, MAX_BUFFER_SIZE - 1, 0, (struct sockaddr*)&other_addr, &addr_len);
+            if (len > 0) {
+                buffer[len] = '\0';
+                Message received_msg;
+                if (deserialize_message(buffer, &received_msg)) {
+                    printf("[UDP RECU] Unité %s agit en %d,%d\n", 
+                            received_msg.target_id, received_msg.pos_x, received_msg.pos_y);
                 }
             }
-            printf("\nPartenaire déconnecté.\n");
-#ifdef _WIN32
-            closesocket(client_sock);
-#else
-            close(client_sock);
-#endif
         }
     }
 
 #ifdef _WIN32
     closesocket(sock);
-    WSACleanup();
+ WSACleanup();
 #else
     close(sock);
 #endif
