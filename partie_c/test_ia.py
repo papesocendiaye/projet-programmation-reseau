@@ -1,7 +1,7 @@
 import socket
 from protocol import Message  # Message est dans protocol.py
 from tampon import TCPBuffer   # TCPBuffer est dans tampon.py
-
+#changement
 # On crée un serveur qui attend le programme C
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server.bind(('0.0.0.0', 5000))
