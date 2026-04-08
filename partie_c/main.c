@@ -1,101 +1,87 @@
-/*Un processus réseau en C : gère les
- sockets TCP et la communication entre joueurs 
-Responsabilités 
-- Créer le socket serveur TCP 
-- Accepter les connexions clients
-- Lire les messages des clients
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "protocol.h" // On inclut le travail du groupe Liaison
 
-*/
-#include <stdio.h>       // Bibliothèque standard pour l'affichage (printf)
-#include <stdlib.h>      // Pour la gestion de la mémoire et exit()
-#include <string.h>      // Pour manipuler les chaînes de caractères (memset)
-#include <unistd.h>      // Pour les fonctions système Linux (close, read)
-#include <arpa/inet.h>   // Bibliothèque spécifique aux sockets (IP, ports)
+#ifdef _WIN32
+    #include <winsock2.h>
+    #include <ws2tcpip.h>
+    #pragma comment(lib, "ws2_32.lib")
+#else
+    #include <unistd.h>
+    #include <arpa/inet.h>
+    #include <sys/socket.h>
+#endif
 
-#define PORT 5000        // Le port sur lequel les deux PC vont communiquer
+#define PORT 5000
 
 int main(int argc, char *argv[]) {
-    // Déclarations des variables
-    int sock = 0, conn_sock;
-    struct sockaddr_in serv_addr; // Structure contenant l'adresse IP et le Port
-    char buffer[1024] = {0};      // Espace mémoire pour stocker les messages reçus
+    // 1. INITIALISATION RÉSEAU (Windows/Linux)
+#ifdef _WIN32
+    WSADATA wsaData;
+    WSAStartup(MAKEWORD(2, 2), &wsaData);
+#endif
 
-    // --- MISSION MEMBRE 1 : CRÉATION DE LA SOCKET ---
-    // On crée un "point de communication". AF_INET = IPv4, SOCK_STREAM = TCP
-    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        printf("\n Erreur de création de socket \n");
-        return -1;
-    }
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_in addr;
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(PORT);
 
-    // Configuration de l'adresse (Famille et Port)
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(PORT); // htons convertit le port pour le réseau
+    TCPBuffer net_buffer;
+    init_buffer(&net_buffer);
+    char raw_recv[MAX_BUFFER_SIZE];
 
-    // --- LOGIQUE SANS SERVEUR (P2P) ---
-    // Si on passe une adresse IP en argument (ex: ./reseau_test 192.168.1.10)
     if (argc > 1) {
+        // --- MODE CLIENT ---
+        addr.sin_addr.s_addr = inet_addr(argv[1]);
+        connect(sock, (struct sockaddr *)&addr, sizeof(addr));
+        printf("Connecté au partenaire.\n");
+
+        // Exemple d'envoi utilisant le protocole du Membre 6
+        Message my_action = {1, 150, 200, ACTION_MOVE, "Soldier1"};
+        char to_send[MAX_BUFFER_SIZE];
+        serialize_message(&my_action, to_send, sizeof(to_send));
         
-        // --- CAS CLIENT (On rejoint un ami) ---
-        printf("Tentative de connexion vers %s...\n", argv[1]);
-        
-        // Convertit l'adresse IP du texte (ex: "192...") vers le format binaire réseau
-        if (inet_pton(AF_INET, argv[1], &serv_addr.sin_addr) <= 0) {
-            printf("\nAdresse invalide ou non supportée\n");
-            return -1;
-        }
+        send(sock, to_send, strlen(to_send), 0);
+        printf("Message envoyé : %s", to_send);
 
-        // Tente d'établir la connexion avec l'autre PC
-        if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-            // MISSION MEMBRE 2 : GESTION D'ERREUR
-            printf("\nConnexion échouée. Vérifiez l'IP ou si l'autre PC écoute.\n");
-            return -1;
-        }
-
-        // Envoi d'un message de test pour valider que le tuyau fonctionne
-        send(sock, "Bonjour depuis le PC distant !", 30, 0);
-        printf("Message de test envoyé.\n");
-    } 
-    else {
-        // --- CAS "SERVEUR" LOCAL (On attend un ami) ---
-        
-        // MISSION MEMBRE 2 : Option pour réutiliser le port sans attendre (REUSEADDR)
-        int opt = 1;
-        setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-
-        // On dit à la socket d'écouter sur n'importe quelle interface réseau du PC
-        serv_addr.sin_addr.s_addr = INADDR_ANY;
-
-        // Attachement de la socket au port 5000
-        if (bind(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-            printf("\nErreur de Bind : le port est peut-être déjà utilisé.\n");
-            return -1;
-        }
-
-        // On met la socket en mode "écoute"
+    } else {
+        // --- MODE SERVEUR (P2P) ---
+        addr.sin_addr.s_addr = INADDR_ANY;
+        bind(sock, (struct sockaddr *)&addr, sizeof(addr));
         listen(sock, 3);
-        printf("En attente d'une connexion sur le port %d...\n", PORT);
+        printf("En attente sur le port %d...\n", PORT);
+
+        int client_sock = accept(sock, NULL, NULL);
         
-        // Le programme se bloque ici jusqu'à ce qu'un ami se connecte
-        conn_sock = accept(sock, (struct sockaddr *)NULL, NULL);
-        
-        // MISSION MEMBRE 2 : Vérification si la connexion a bien été acceptée
-        if (conn_sock < 0) {
-            printf("Erreur lors de l'acceptation de la connexion.\n");
-            return -1;
+        // Réception avec le découpage du Membre 7
+        int bytes_received = recv(client_sock, raw_recv, MAX_BUFFER_SIZE - 1, 0);
+        if (bytes_received > 0) {
+            add_data(&net_buffer, raw_recv, bytes_received);
+            
+            char single_message[MAX_BUFFER_SIZE];
+            if (get_next_message(&net_buffer, single_message)) {
+                Message received_msg;
+                if (deserialize_message(single_message, &received_msg)) {
+                    printf("\n--- Message reçu et décodé ---\n");
+                    printf("Joueur: %d | Pos: %d,%d | Action: %d | Cible: %s\n", 
+                            received_msg.id_joueur, received_msg.pos_x, 
+                            received_msg.pos_y, received_msg.action, received_msg.target_id);
+                }
+            }
         }
-        
-        printf("Connexion acceptée !\n");
-        
-        // Lecture des données reçues depuis l'autre PC
-        // MISSION MEMBRE 1 : Afficher ce qu'on reçoit
-        read(conn_sock, buffer, 1024);
-        printf("Message reçu : %s\n", buffer);
-        
-        // Fermeture de la connexion après réception
-        close(conn_sock);
+#ifdef _WIN32
+        closesocket(client_sock);
+#else
+        close(client_sock);
+#endif
     }
 
-    // Fermeture de la socket principale
+#ifdef _WIN32
+    closesocket(sock);
+    WSACleanup();
+#else
     close(sock);
+#endif
     return 0;
 }
