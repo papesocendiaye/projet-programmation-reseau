@@ -7,6 +7,9 @@ import sys, os
 if os.name != 'nt':
     import termios
     import tty
+else:
+    termios = None
+    tty = None
 from collections import deque
 from random import randint
 from numpy import mean
@@ -202,7 +205,7 @@ class Engine:
 
         next_view_time = time.time()
 
-        while self.is_running and self.current_turn < self.max_turns:
+        while self.is_running:
             turn_start = time.time()
             if self.tournaments:
                 self.process_turn()
@@ -477,20 +480,13 @@ class Engine:
         units_team1 = len([u for u in self.units if u.team == 'R' and u.is_alive])
         units_team2 = len([u for u in self.units if u.team == 'B' and u.is_alive])
 
-        # selection du winner gagne si tout les adverse sont mort
+        # On conserve le calcul du gagnant, mais on ne stoppe plus automatiquement la simulation.
         if units_team1 == 0 and units_team2 == 0:
             self.winner = None
-            self.is_running = False
         elif units_team1 == 0:
             self.winner = self.ia2
-            self.is_running = False
         elif units_team2 == 0:
             self.winner = self.ia1
-            self.is_running = False
-
-        if self.current_turn > self.max_turns:
-            self.winner = None
-            self.is_running = False
         pass
 
 
