@@ -1,12 +1,12 @@
 from dataclasses import dataclass
 from enum import IntEnum
-import socket
 
 class ActionType(IntEnum):
     MOVE = 0
     ATTACK = 1
     SPAWN = 2
     REQ_OWNERSHIP = 3
+    HELLO = 4 # Ajouté pour être synchro avec le C
 
 @dataclass
 class Message:
@@ -20,19 +20,11 @@ class Message:
         # Format simple sans \n (UDP s'occupe de la séparation)
         msg_str = f"{self.id_joueur}|{int(self.pos_x)}|{int(self.pos_y)}|{self.action.value}|{self.target_id}"
         return msg_str.encode('utf-8')
+        return f"{self.id_joueur}|{self.pos_x}|{self.pos_y}|{int(self.action)}|{self.target_id}".encode('utf-8')
 
     @classmethod
-    def deserialize(cls, data_str: str):
-        parts = data_str.strip().split("|")
-        if len(parts) != 5:
-            return None
+    def deserialize(cls, data: str):
         try:
-            return cls(
-                id_joueur=int(parts[0]),
-                pos_x=int(parts[1]),
-                pos_y=int(parts[2]),
-                action=ActionType(int(parts[3])),
-                target_id=parts[4],
-            )
-        except Exception:
-            return None
+            p = data.strip().split('|')
+            return cls(int(p[0]), int(p[1]), int(p[2]), ActionType(int(p[3])), p[4])
+        except: return None

@@ -48,6 +48,8 @@ int main(int argc, char *argv[]) {
     int sock_reseau = socket(AF_INET, SOCK_DGRAM, 0);
 
     struct sockaddr_in addr_ia, addr_res;
+    struct sockaddr_in addr_ia, addr_res, sender_addr;
+    socklen_t addr_len = sizeof(sender_addr);
     char buffer[MAX_BUFFER_SIZE];
 
     // Liaison socket locale (IA)
@@ -64,6 +66,7 @@ int main(int argc, char *argv[]) {
 
     printf("Nœud P2P actif. IA sur 5000, Réseau sur 6000.\n");
 
+    // Si on donne une IP au lancement, on envoie un HELLO
     if (argc > 1) {
         struct sockaddr_in first_peer;
         first_peer.sin_family = AF_INET;
@@ -87,6 +90,14 @@ int main(int argc, char *argv[]) {
         FD_SET(sock_reseau, &readfds);
         int max_fd = (sock_ia > sock_reseau) ? sock_ia : sock_reseau;
 
+
+    fd_set readfds;
+    while (1) {
+        FD_ZERO(&readfds);
+        FD_SET(sock_ia, &readfds);
+        FD_SET(sock_reseau, &readfds);
+        int max_fd = (sock_ia > sock_reseau) ? sock_ia : sock_reseau;
+
         select(max_fd + 1, &readfds, NULL, NULL, NULL);
 
         // CAS 1 : L'IA locale envoie un ordre -> On le broadcast au réseau
@@ -99,6 +110,7 @@ int main(int argc, char *argv[]) {
             python_client_addr = sender_addr;
             python_connected = 1;
 
+            int len = recvfrom(sock_ia, buffer, MAX_BUFFER_SIZE-1, 0, NULL, NULL);
             for (int i=0; i<MAX_PEERS; i++) {
                 if (lobby[i].active) sendto(sock_reseau, buffer, len, 0, (struct sockaddr*)&lobby[i].addr, sizeof(lobby[i].addr));
             }
@@ -118,6 +130,8 @@ int main(int argc, char *argv[]) {
                     // CORRECTION : On envoie au Python, pas à nous-même !
                     sendto(sock_ia, buffer, len, 0, (struct sockaddr*)&python_client_addr, sizeof(python_client_addr));
                 }
+                if (m.action == ACTION_HELLO) add_peer(sender_addr);
+                else sendto(sock_ia, buffer, len, 0, (struct sockaddr*)&addr_ia, sizeof(addr_ia));
             }
         }
     }
