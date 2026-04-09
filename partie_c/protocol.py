@@ -11,14 +11,14 @@ class ActionType(IntEnum):
 @dataclass
 class Message:
     id_joueur: int
-    pos_x: int
-    pos_y: int
+    pos_x: float
+    pos_y: float
     action: ActionType
     target_id: str
 
     def serialize(self) -> bytes:
         # Format simple sans \n (UDP s'occupe de la séparation)
-        msg_str = f"{self.id_joueur}|{self.pos_x}|{self.pos_y}|{self.action.value}|{self.target_id}"
+        msg_str = f"{self.id_joueur}|{int(self.pos_x)}|{int(self.pos_y)}|{self.action.value}|{self.target_id}"
         return msg_str.encode('utf-8')
 
     @classmethod

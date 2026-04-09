@@ -2,6 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include "protocol.h"
+#ifdef _WIN32
+    typedef int socklen_t;
+#endif
 
 #ifdef _WIN32
     #include <winsock2.h>

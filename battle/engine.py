@@ -155,14 +155,10 @@ class Engine:
 
         if not self.tournaments: print(f"Loading scenario: {self.scenario_name}")
         self.game_map = Map()
-        #Map.load(self.game_map, self.scenario_name)
-        if self.tournaments:
-            # Mode tournoi: chargement classique instantané
-            Map.load(self.game_map, self.scenario_name)
-        else:
-            # Mode normal: chargement progressif
-            self.game_map.load_dimensions(self.scenario_name)
-            self.build_spawn_queue()
+    
+        Map.load(self.game_map, self.scenario_name)
+        if not self.tournaments: 
+           self.build_spawn_queue()
 
     def build_spawn_queue(self):
         """Construit la file de spawn progressive en alternant R et B"""

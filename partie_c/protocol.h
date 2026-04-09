@@ -11,7 +11,8 @@ typedef enum {
     ACTION_MOVE, 
     ACTION_ATTACK, 
     ACTION_SPAWN, 
-    ACTION_REQ_OWNERSHIP 
+    ACTION_REQ_OWNERSHIP,
+    ACTION_HELLO 
 } ActionType;
 
 typedef struct {
