@@ -1,4 +1,4 @@
-from engine import Engine
+from battle.engine import Engine
 
 # Remplacez "nom_du_scenario", "nom_ia_1" et "nom_ia_2" par les VRAIS noms 
 # qui sont dans votre AI_REGISTRY et vos fichiers de scénarios.

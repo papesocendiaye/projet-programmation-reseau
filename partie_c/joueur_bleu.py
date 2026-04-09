@@ -1,4 +1,4 @@
-from engine import Engine
+from battle.engine import Engine
 
 if __name__ == "__main__":
     print("--- Démarrage Joueur BLEU ---")
