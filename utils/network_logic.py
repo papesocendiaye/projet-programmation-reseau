@@ -25,7 +25,12 @@ def traiter_message_reseau(msg, engine):
         # On lui injecte l'ID réseau pour la suivre lors des prochains tours
         new_unit.network_id = unite_id 
         
+        # Ajout à la liste des unités
         engine.units.append(new_unit)
+
+        # ---> AJOUT POUR LA MINIMAP ET L'IA : Placement sur la carte
+        engine.game_map.map[pos] = new_unit
+        
         print(f"[RESEAU] Spawn fantôme {unite_type} ({unite_id}) à la position {pos}")
 
     # --- CAS B : Mise à jour d'une unité (Position / Vie) ---
@@ -33,10 +38,21 @@ def traiter_message_reseau(msg, engine):
         # Format attendu : UPDATE:ID:X:Y:HP
         unite_id = data[1]
         new_pos = (float(data[2]), float(data[3]))
-        new_hp = int(data[4])
+        new_hp = float(data[4]) # Modifié en float au cas où des dégâts décimaux transitent
 
         for u in engine.units:
             if hasattr(u, 'network_id') and u.network_id == unite_id:
+                
+                # ---> AJOUT POUR LA MINIMAP ET L'IA : Mise à jour de la carte
+                # 1. On retire l'unité de son ancienne position sur la carte
+                if u.position in engine.game_map.map:
+                    del engine.game_map.map[u.position]
+                
+                # 2. Mise à jour de ses statistiques réelles
                 u.position = new_pos
                 u.current_hp = new_hp
+                
+                # 3. On replace l'unité à ses nouvelles coordonnées sur la carte
+                engine.game_map.map[new_pos] = u
+                
                 break
