@@ -1,0 +1,447 @@
+=====================================================================
+  PLAN : Multi-joueurs dynamique (N equipes, IP manuelle + propagation
+         de lobby, scenarios par joueur) - remplace plan_2_machines.txt
+=====================================================================
+  A NE PAS IMPLEMENTER MAINTENANT - plan de reflexion uniquement
+
+
+0. CONTEXTE
+------------
+Le plan precedent (plan_2_machines.txt) prevoyait deux machines figees
+Rouge vs Bleue, avec un scenario identique copie sur les deux postes et
+une IP codee en dur au lancement. Ce modele ne repond pas a l'exigence
+du sujet :
+
+  "Vous permettez de creer une partie entre differents participants.
+   Cela peut passer par un mecanisme d'invitation comme le principe
+   d'une session Zoom. Vous evitez d'avoir a attendre que tous les
+   participants soient presents pour commencer une partie."
+
+Trois assouplissements decides :
+
+  1) Scenario par joueur : chaque joueur apporte son propre fichier
+     de placement (liste de SES unites). Carte partagee (memes
+     dimensions), placement libre et independant.
+
+  2) N joueurs / N equipes : plus de dichotomie R/B codee en dur.
+     Chaque joueur choisit sa lettre d'equipe (A..Z). Le moteur de
+     combat est deja compatible (unit.py:183 teste seulement
+     self.team != other.team).
+
+  3) Decouverte par IP + propagation de lobby : on conserve le
+     modele "connaitre au moins une IP d'un pair pour rejoindre"
+     (plan_2_machines.txt), fonctionne sur LAN ET sur Internet,
+     pas de probleme de pare-feu broadcast. Pour permettre > 2
+     joueurs sans obliger chaque nouveau a connaitre TOUS les autres,
+     on ajoute la PROPAGATION DU LOBBY : quand un pair recoit un
+     HELLO, il repond avec la liste des autres pairs qu'il connait
+     deja. Le nouveau venu apprend alors l'existence de tout le
+     groupe via UN SEUL contact initial.
+
+     Exemple a 3 joueurs :
+       - A lance en solo, joue seul
+       - B lance en donnant l'IP de A -> B connait A, A connait B
+       - C lance en donnant l'IP de A -> C envoie HELLO a A, A repond
+         HELLO_ACK + LOBBY_LIST contenant B. C ajoute A et B a son
+         propre lobby et envoie HELLO a B. Fin du handshake : chaque
+         machine connait les 2 autres.
+
+Resultat : une machine lance son jeu immediatement, joue seule en
+attendant, et des qu'un autre joueur se connecte en donnant son IP
+(ou l'IP de n'importe quel joueur deja dans la partie), les unites
+de tout le monde convergent sur les ecrans de tout le monde (join
+"a la Zoom").
+
+
+1. FICHIERS A MODIFIER
+-----------------------
+  partie_c/protocol.h    -> ACTION_HELLO_ACK, NEW_PEER, FULL_SYNC_REQ
+  partie_c/protocol.py   -> miroir Python des nouveaux ActionType
+  partie_c/main.c        -> bug forward + broadcast HELLO + NEW_PEER
+                            + ports en argv
+  partie_c/client.py     -> ports configurables via constructeur
+  battle/engine.py       -> local_team, suppression du hardcoding R/B,
+                            1 seule IA locale, check_victory N equipes
+  battle/net_sync.py     -> filtrage equipe locale, encodage lettre,
+                            full-resync sur NEW_PEER
+  battle/scenario.py     -> format "team-agnostique"
+  battle/map.py          -> supprimer la symetrisation R/B si multi
+  main.py                -> CLI : --team A, --map-size, --scenario-file,
+                            1 seule IA
+
+Aucun nouveau fichier. battle/net_sync.py existe deja (non commite).
+
+
+2. PHASE 1 - BUG BLOQUANT (prerequis identique au plan precedent)
+------------------------------------------------------------------
+  partie_c/main.c ligne 102 :
+    else sendto(sock_ia, buffer, len, 0,
+                (struct sockaddr*)&addr_ia, sizeof(addr_ia));
+
+  addr_ia pointe vers port 5000 (ou le C ECOUTE l'IA), pas vers 5001
+  (ou Python ECOUTE le C).
+
+  FIX : creer addr_python_out sur le port 5001 :
+    struct sockaddr_in addr_python_out;
+    addr_python_out.sin_family = AF_INET;
+    addr_python_out.sin_addr.s_addr = inet_addr("127.0.0.1");
+    addr_python_out.sin_port = htons(5001);
+    // ligne 102 : remplacer addr_ia par addr_python_out
+
+
+3. PHASE 2 - EXTENSION DU PROTOCOLE
+------------------------------------
+  partie_c/protocol.h : ajouter a l'enum ActionType
+    ACTION_HELLO_ACK,      // reponse a HELLO (contient la LOBBY_LIST
+                           // dans target_id : "ip1;ip2;ip3")
+    ACTION_NEW_PEER,       // C -> Python : nouveau pair dans le lobby
+
+  Le champ target_id[32] est reutilise :
+    - Pour les unites : "A_K_3" (prefixe = lettre d'equipe)
+    - Pour HELLO_ACK : liste d'IPs separees par ";" (max ~30 chars,
+      donc limite a ~2 IPs par ACK ; au-dela, envoyer plusieurs ACKs
+      successifs, ou etendre target_id a 64 chars).
+
+  NOTE : target_id 32 chars est serre. Alternative : agrandir a 64
+  ou 128 chars dans protocol.h. Peu couteux, recommande.
+
+  partie_c/protocol.py : memes ajouts dans ActionType cote Python.
+
+
+4. PHASE 3 - RELAIS C : IP MANUELLE + PROPAGATION DE LOBBY
+-----------------------------------------------------------
+  Principe general : on conserve le mecanisme existant de main.c
+  (argv[1] = IP d'un pair de reference) et on l'etend pour :
+    - supporter PLUSIEURS IPs au lancement (argv[1..N])
+    - envoyer un HELLO_ACK contenant la LOBBY_LIST a chaque HELLO recu
+    - notifier Python quand le lobby grossit (pour resync)
+
+  partie_c/main.c :
+
+  4.1 Lire les IPs en argv : au lieu d'un seul argv[1], boucler sur
+      argv[1..argc-1] et envoyer un HELLO unicast a chaque IP donnee.
+      Les IPs sans port explicite utilisent PORT_RESEAU par defaut.
+      Exemple : ./main.exe 192.168.1.20 192.168.1.21
+
+      (Optionnel : accepter aussi une syntaxe "IP:port" pour permettre
+      le multi-instance sur une meme machine avec ports differents.)
+
+  4.2 A la reception d'un HELLO :
+        - ajouter l'emetteur au lobby (add_peer)
+        - construire la LOBBY_LIST = concatenation des autres IPs
+          deja connues ("ip1;ip2;...") dans target_id
+        - envoyer un HELLO_ACK unicast vers l'emetteur
+
+  4.3 A la reception d'un HELLO_ACK :
+        - ajouter l'emetteur au lobby
+        - PARSER la LOBBY_LIST dans target_id
+        - pour chaque IP nouvelle qu'on ne connait pas encore :
+            - l'ajouter au lobby
+            - lui envoyer notre propre HELLO (pour qu'elle nous
+              ajoute a son lobby a elle)
+        - cela garantit que tous les pairs se rencontrent en
+          quelques round-trips, sans serveur central
+
+  4.4 Eviter les boucles infinies : un pair ne reenvoie JAMAIS un
+      HELLO_ACK a quelqu'un qu'il a deja dans son lobby avant le
+      message courant. Concretement : si add_peer detecte "deja
+      present" dans l'ancien etat, on ignore juste le HELLO recu
+      (sauf pour le premier HELLO qui etablit la connexion).
+
+  4.5 Notifier Python a l'ajout d'un pair : dans add_peer(), apres
+      insertion effective d'une NOUVELLE adresse, envoyer un Message
+      ACTION_NEW_PEER vers addr_python_out (port 5001). Le target_id
+      contient l'IP du nouveau pair (informatif).
+
+  4.6 Ports configurables via argv (optionnel mais tres utile pour
+      les tests locaux a 2-3 instances sur la meme machine) :
+        ./main.exe --port-ia 5000 --port-reseau 6000 192.168.1.20
+      Les flags sont parses avant la liste d'IPs.
+
+  partie_c/client.py :
+    Accepter port_ecoute et port_c dans le constructeur de IPCClient
+    (actuellement codes en dur 5001 / 5000).
+
+
+5. PHASE 4 - MOTEUR : DECORRELER DU MODELE R/B
+-----------------------------------------------
+  battle/engine.py :
+
+  5.1 Nouveau champ __init__ :
+        self.local_team = None   # None = mode R/B classique
+                                 # sinon 'A', 'B', 'C', ...
+        self.local_ia_name = None
+
+  5.2 initialize_ai : en mode multi, instancier UNE SEULE IA :
+        if self.local_team is not None:
+            self.ia_local = AI_REGISTRY[self.local_ia_name](
+                                self.local_team, self.game_map)
+            self.ia_local.initialize()
+        else:
+            # branche R/B actuelle conservee (retrocompat)
+            ...
+
+  5.3 process_turn (engine.py:458-478) : remplacer la comparaison
+      hardcodee R/B :
+        for unit in self.units:
+            if not unit.is_alive: continue
+            if self.local_team is not None:
+                if unit.team == self.local_team:
+                    self.ia_local.play_turn(unit, self.current_turn)
+            else:
+                # branche R/B actuelle conservee
+                ...
+
+  5.4 process_spawns (engine.py:174-192) : si local_team est defini,
+      ne spawner que les unites dont team == local_team. En pratique,
+      la spawn_queue ne devrait deja contenir que ces unites (voir
+      phase 5 ci-dessous).
+
+  5.5 check_victory (engine.py:571-585) : comptage dynamique au lieu
+      de R/B :
+        alive_by_team = {}
+        for u in self.units:
+            if u.is_alive:
+                alive_by_team[u.team] = alive_by_team.get(u.team, 0) + 1
+        if len(alive_by_team) == 1:
+            self.winner = next(iter(alive_by_team))
+        elif len(alive_by_team) == 0:
+            self.winner = None
+        # sinon partie en cours
+
+  5.6 init_network : accepter local_team, ports, et les transmettre au
+      NetSync.
+
+
+6. PHASE 5 - SCENARIOS PAR JOUEUR
+----------------------------------
+  battle/scenario.py :
+    Format actuel "x,y,type" conserve. La premiere ligne "p,q"
+    (dimensions) devient indicative - la source de verite est
+    l'argument CLI --map-size. Si le fichier contient une colonne
+    equipe (format etendu x,y,type,team), elle est IGNOREE et
+    remplacee par local_team a la construction.
+
+  battle/engine.py build_spawn_queue :
+    Reecriture en mode multi (plus de mirroring) :
+      if self.local_team is not None:
+          self.spawn_queue = [(x, y, t, self.local_team)
+                              for (x, y, t) in scenario]
+      else:
+          # branche R/B actuelle conservee
+          ...
+
+  battle/map.py :
+    Dans load_scenario / load_dimensions, si local_team est defini,
+    NE PAS executer la logique de symetrisation rouge/bleue. Les
+    dimensions viennent de --map-size.
+
+
+7. PHASE 6 - NET_SYNC : MULTI-EQUIPES + RESYNC DYNAMIQUE
+---------------------------------------------------------
+  battle/net_sync.py :
+
+  7.1 Encodage equipe :
+      Aujourd'hui TEAM_TO_INT = {'R': 0, 'B': 1} (net_sync.py:19).
+      Remplacer par :
+      - id_joueur du Message = 0 (champ inutilise en multi)
+      - La lettre d'equipe est le premier caractere de unit_id
+        (ex "A_K_3"). _apply_spawn et autres lecteurs la recuperent
+        par uid.split('_')[0].
+
+  7.2 Filtrage a l'envoi :
+      Dans send_updates(), ne traiter que les unites LOCALES :
+        if unit.team != self.local_team:
+            continue
+
+      IMPORTANT : ce choix DIFFERE du plan_2_machines.txt qui voulait
+      envoyer les ATTACK pour TOUTES les unites. Dans un modele N
+      joueurs, c'est le PROPRIETAIRE de l'unite blessee qui est
+      autoritatif sur ses HP. Quand A attaque une unite B :
+        1. A calcule le degat localement, met a jour l'unite B
+           (copie locale chez A)
+        2. B recoit l'ATTACK de A via son propre net_sync (il voit
+           que son unite a perdu des HP)
+        3. Seule B broadcaste ensuite le nouveau HP a tout le monde
+      Cela garantit la coherence avec N pairs : un seul emetteur
+      autoritatif par unite.
+
+      NOTE : ce schema necessite que les degats locaux soient aussi
+      propages entre pairs. La solution : quand on recoit un ATTACK
+      qui modifie UNE DE NOS unites, on applique le degat ET on laisse
+      le prochain send_updates() le renvoyer comme event local. Les
+      doublons (2 chemins) sont absorbes car le HP est ABSOLU, pas
+      differentiel.
+
+  7.3 Resync sur nouveau pair :
+      Dans _apply(), ajouter :
+        elif msg.action == ActionType.NEW_PEER:
+            self.prev_snapshot = {}   # force full resend au prochain tick
+      Les pairs deja au courant ignorent les duplicatas via
+      find_unit_by_id (net_sync.py:116).
+
+  7.4 Ports configurables :
+      NetSync instancie IPCClient() avec les ports passes par
+      engine.init_network (plus de hardcoding).
+
+
+8. PHASE 7 - CLI main.py
+-------------------------
+  Nouveaux arguments pour "battle run" :
+
+    --team A              lettre d'equipe locale (active le mode multi)
+    --map-size 100x100    dimensions de la carte partagee
+    --scenario-file PATH  fichier de placement local
+    --port-c N            port du relais C cote envoi (defaut 5000)
+    --port-listen N       port Python d'ecoute (defaut 5001)
+
+  NOTE : Python n'a PAS besoin de connaitre les IPs des pairs. Le
+  relais C s'en occupe (IPs passees en argv au lancement du .exe).
+  Python dialogue UNIQUEMENT avec le relais C local via 127.0.0.1.
+
+  En mode multi, UNE SEULE IA est requise. Exemple :
+
+    # Joueur A (premier a lancer, solo)
+    ./partie_c/main.exe
+    python main.py battle run --team A --map-size 100x100 \
+        --scenario-file data/scenario/armee_a.txt Major_DAFT
+
+    # Joueur B (rejoint A en connaissant son IP)
+    ./partie_c/main.exe 192.168.1.10
+    python main.py battle run --team B --map-size 100x100 \
+        --scenario-file data/scenario/armee_b.txt Major_DAFT
+
+    # Joueur C (rejoint la partie en connaissant JUSTE l'IP de A,
+    # il decouvre B automatiquement via la LOBBY_LIST)
+    ./partie_c/main.exe 192.168.1.10
+    python main.py battle run --team C --map-size 100x100 \
+        --scenario-file data/scenario/armee_c.txt Major_DAFT
+
+  Retrocompatibilite : sans --team, le comportement R/B actuel reste
+  inchange (ia1 ia2, scenario stestN, etc.).
+
+
+9. ORDRE D'IMPLEMENTATION RECOMMANDE
+-------------------------------------
+  1. Bug fix main.c:102 (forward port 5001). Tester qu'un HELLO emis
+     en solo revient bien a Python.
+  2. Protocole : ajouter les nouveaux ActionType dans protocol.h et
+     protocol.py + agrandir target_id a 64 chars.
+  3. Engine N equipes en SOLO : refactor process_turn, check_victory,
+     initialize_ai. Tester en mode local sans reseau : --team A avec
+     ia_local qui joue seule.
+  4. Scenario team-agnostique : adapter scenario.py et build_spawn_queue.
+     Tester qu'un fichier ne contenant que des positions apparait bien
+     en equipe A.
+  5. Relais C : HELLO_ACK unicast + LOBBY_LIST dans target_id +
+     ports configurables via argv. Tester a 2 instances locales :
+     l'instance B passe l'IP/port de A, verifier que les 2 lobbies
+     contiennent l'autre apres 1 round-trip.
+  6. Propagation 3 pairs : lancer A, puis B (pointe vers A), puis
+     C (pointe vers A seulement). Verifier que C apprend B via
+     HELLO_ACK+LOBBY_LIST et envoie son propre HELLO a B.
+  7. NEW_PEER : notification C -> Python + handler dans net_sync.py
+     qui reset prev_snapshot. Tester qu'un joueur qui rejoint APRES
+     le start recoit tout l'etat initial.
+  8. Filtrage envoi/reception multi-equipes dans net_sync. Tester 2
+     joueurs d'equipes differentes sur la meme machine.
+  9. CLI dans main.py.
+  10. Test LAN 2 machines physiques, puis 3 machines pour valider la
+      propagation de lobby.
+
+
+10. VERIFICATION END-TO-END
+----------------------------
+
+  10.1 Test local monoprocessus (sanity)
+    python main.py battle run --team A --map-size 100x100 \
+        --scenario-file data/scenario/test_team_a.txt Major_DAFT
+    Attendu : l'equipe A spawne, joue seule, pas d'erreur reseau
+    (le relais C n'est pas lance, receive_updates tombe sur l'except
+    ConnectionResetError et continue).
+
+  10.2 Test local 2 processus (via IPs + ports separes)
+    Terminal 1 (relais A) :
+      ./partie_c/main.exe --port-ia 5000 --port-reseau 6000
+    Terminal 2 (relais B, pointe vers A via 127.0.0.1:6000) :
+      ./partie_c/main.exe --port-ia 5002 --port-reseau 6001 \
+                          127.0.0.1:6000
+    Terminal 3 (joueur A, lance en premier) :
+      python main.py battle run --team A --map-size 100x100 \
+          --scenario-file data/scenario/test_a.txt \
+          --port-c 5000 --port-listen 5001 Major_DAFT
+    Terminal 4 (joueur B, lance 10s plus tard) :
+      python main.py battle run --team B --map-size 100x100 \
+          --scenario-file data/scenario/test_b.txt \
+          --port-c 5002 --port-listen 5003 Major_DAFT
+    Attendu :
+      - Le joueur A commence seul (ses unites A_* apparaissent)
+      - Quand B lance son relais, le HELLO part vers A
+      - A envoie HELLO_ACK a B (LOBBY_LIST vide puisque A est seul)
+      - Chaque Python recoit un NEW_PEER, resette prev_snapshot,
+        reemet tous ses SPAWN
+      - Sur l'ecran de A, les unites B_* apparaissent en live
+      - Les combats ont lieu, les HP convergent, check_victory
+        declare un vainqueur unique
+
+  10.3 Test local 3 processus (propagation de lobby)
+    Relais A : ./main.exe --port-ia 5000 --port-reseau 6000
+    Relais B : ./main.exe --port-ia 5002 --port-reseau 6001 \
+                          127.0.0.1:6000
+    Relais C : ./main.exe --port-ia 5004 --port-reseau 6002 \
+                          127.0.0.1:6000
+      (C ne connait QUE A au lancement)
+    Attendu :
+      - C envoie HELLO a A
+      - A repond HELLO_ACK avec LOBBY_LIST = "127.0.0.1:6001" (B)
+      - C parse la liste et envoie HELLO a B
+      - B repond HELLO_ACK, ajoute C a son lobby
+      - Les 3 lobbies sont complets, chaque Python voit 2 NEW_PEER
+
+  10.4 Test LAN 2-3 machines physiques
+    Lancer le relais + Python sur chaque machine. Le deuxieme joueur
+    passe l'IP du premier, le troisieme passe l'IP de n'importe quel
+    joueur deja dans la partie. Verifier :
+      - Pare-feu Windows : UDP 6000 autorise en entree/sortie
+      - Les 2 (ou 3) lobbies convergent apres 1-2 round-trips
+      - Join tardif : demarrer la machine C apres 1 minute de jeu
+        A-vs-B et verifier que les unites C apparaissent partout
+      - Les joueurs deja en jeu re-envoient tout leur etat a C
+        grace au reset prev_snapshot declenche par NEW_PEER
+
+
+11. PIEGES CONNUS
+------------------
+  - Paquets UDP perdus -> unite zombie distante. Mitigation legere :
+    renvoyer DEATH quelques ticks de suite (evolution future, pas
+    dans ce plan).
+  - Desynchronisation des dimensions : si deux joueurs passent des
+    --map-size differents, un SPAWN arrivant avec une position hors
+    carte plante. Ajouter une verif dans _apply_spawn qui rejette les
+    positions out-of-bounds + log.
+  - Collision de lettres d'equipe : si deux joueurs choisissent
+    --team A, leurs unites auront des IDs qui peuvent collisionner
+    (A_K_0 chez les deux). Mitigation v1 : laisser l'utilisateur
+    s'organiser. v2 : rejeter au HELLO si un pair declare deja notre
+    lettre (le HELLO peut porter la lettre d'equipe dans target_id).
+  - Latence LAN : 1-5ms. A 60 TPS (16ms/tick), decalage visuel de
+    1-2 ticks, imperceptible.
+  - LOBBY_LIST trop longue : target_id limite a 64 chars, soit environ
+    4 IPv4 "192.168.1.100;" par message. Au-dela de 4 pairs connus,
+    fragmenter la LOBBY_LIST sur plusieurs HELLO_ACK consecutifs.
+  - Chaque pair doit etre JOIGNABLE depuis les autres (port UDP
+    RESEAU ouvert en entrant). Sur Internet derriere NAT, cela
+    necessite une redirection de port ou un pair de rendez-vous
+    (hors scope).
+
+
+12. RESUME
+-----------
+  Fichiers a modifier : 9 (protocol.h, protocol.py, main.c, client.py,
+                           engine.py, net_sync.py, scenario.py,
+                           map.py, main.py)
+  Fichiers inchanges  : unit.py (deja N-equipes compatible), IAs
+  Nouveau fichier     : aucun
+  Effort estime       : eleve (refactor R/B -> N equipes + decouverte
+                        dynamique), mais chaque phase est testable
+                        independamment

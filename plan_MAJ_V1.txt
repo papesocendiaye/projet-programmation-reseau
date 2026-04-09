@@ -1,0 +1,117 @@
+=====================================================================
+  PLAN : V1 Best-Effort Network Updates (MAJ)
+=====================================================================
+
+1. CONTEXTE
+-----------
+Le sujet demande une V1 ou chaque evenement local (spawn, deplacement,
+attaque, mort) est immediatement envoye aux autres joueurs via le canal
+C/UDP existant (partie_c/). A la reception, le joueur distant integre
+la MAJ dans son affichage. Pas de propriete reseau en V1 - concurrence
+sauvage, incoherences acceptees.
+
+
+2. APPROCHE : SNAPSHOT-DIFF
+----------------------------
+Apres chaque tour, on compare l'etat courant des unites avec un
+snapshot precedent. Seules les differences sont envoyees comme messages.
+Cote reception, on poll les messages et on les applique a l'etat local.
+Zero modification de la logique de jeu (map.py, unit.py, IAs).
+
+
+3. FICHIERS MODIFIES
+---------------------
+
+  3.1  partie_c/protocol.py  -  Ajouter DEATH = 5
+       Une seule ligne ajoutee dans l'enum ActionType.
+
+  3.2  partie_c/protocol.h   -  Ajouter ACTION_DEATH
+       Une seule ligne dans l'enum C.
+
+  3.3  battle/unit.py ligne 46  -  Corriger typo
+       self.unid_id = ""  -->  self.unit_id = ""
+
+  3.4  battle/net_sync.py  -  NOUVEAU FICHIER (~140 lignes)
+       Classe NetSync avec:
+       - __init__(engine)      : cree l'IPCClient, init le snapshot vide
+       - send_updates()        : snapshot courant vs precedent, envoie diffs
+       - receive_updates()     : poll les messages, les applique
+       - _apply_spawn/move/attack/death() : traitement par type
+
+       Encodage des messages dans le format existant:
+       - SPAWN  : team_int | x*100 | y*100 | 2 | "unit_id:type"
+       - MOVE   : team_int | x*100 | y*100 | 0 | "unit_id"
+       - ATTACK : team_int | hp*100 | 0     | 1 | "unit_id"
+       - DEATH  : team_int | x*100 | y*100 | 5 | "unit_id"
+
+  3.5  battle/engine.py  -  Integration (~15 lignes ajoutees)
+       - self.net_sync = None dans __init__
+       - init_network()   : cree NetSync
+       - _net_receive()   : wrapper receive
+       - _net_send()      : wrapper send
+       - Appels dans game_loop() :
+           _net_receive() AVANT process_turn()
+           _net_send()    APRES update_projectiles()
+       - initialize_units() : assigner unit_id (mode tournoi)
+
+  3.6  main.py  -  Flag --network (+3 lignes)
+       - Ajouter -n/--network au parser
+       - Si active: engine.init_network() avant engine.start()
+
+
+4. SEQUENCE PAR TICK
+---------------------
+  1. _net_receive()        <-- integrer les MAJ distantes
+  2. process_turn()        <-- IA locale decide
+  3. process_spawns()      <-- apparition progressive
+  4. check_victory()
+  5. update_units()
+  6. update_projectiles()
+  7. _net_send()           <-- envoyer les changements locaux
+
+
+5. FORMAT DES MESSAGES
+-----------------------
+Le protocole existant est: "id_joueur|pos_x|pos_y|action|target_id"
+
+  SPAWN  -->  "0|1500|2000|2|R_K_0:K"
+              (equipe 0=R, position 15.00/20.00, action SPAWN, id:type)
+
+  MOVE   -->  "0|1650|2100|0|R_K_0"
+              (equipe 0=R, nouvelle position 16.50/21.00, action MOVE, id)
+
+  ATTACK -->  "1|3500|0|1|B_C_3"
+              (equipe 1=B, nouveau HP=35.00, action ATTACK, id de la victime)
+
+  DEATH  -->  "0|1500|2000|5|R_K_0"
+              (equipe 0=R, derniere position, action DEATH, id)
+
+Les positions float sont multipliees par 100 pour etre envoyees en int.
+
+
+6. FLUX DE DONNEES
+-------------------
+  Python local                    C relay (main.c)              C relay distant
+  ============                    ===============               ===============
+  send_action(msg)  --UDP:5000--> recvfrom(sock_ia)
+                                  broadcast a tous peers --UDP:6000--> recvfrom(sock_reseau)
+                                                                       forward a Python --UDP:5001-->
+  get_pending_messages() <--UDP:5001-- sendto(sock_ia)                 get_pending_messages()
+
+
+7. VERIFICATION
+----------------
+  1. Lancer le C relay: ./main.exe (sans argument = pas de peer)
+  2. Lancer le jeu:   python main.py battle run stest1 Major_DAFT Major_DAFT -n
+  3. Verifier que "[NET] Synchronisation reseau initialisee" s'affiche
+  4. Le jeu doit tourner normalement (pas de regression)
+  5. Test 2 joueurs: 2 relays C pointant l'un vers l'autre + 2 instances Python
+
+
+8. LIMITATIONS V1
+------------------
+  - Pas de propriete reseau (sera en V2)
+  - Incoherences possibles si 2 joueurs modifient la meme unite
+  - Pas de garantie d'ordre des messages (UDP)
+  - Pas de retransmission si perte de paquet
+  - Observation en "best-effort" avec decalage temporel acceptable

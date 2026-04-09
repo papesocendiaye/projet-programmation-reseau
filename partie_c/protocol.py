@@ -7,6 +7,7 @@ class ActionType(IntEnum):
     SPAWN = 2
     REQ_OWNERSHIP = 3
     HELLO = 4 # Ajouté pour être synchro avec le C
+    DEATH = 5 # Mort d'une unité (V1 MAJ)
 
 @dataclass
 class Message:

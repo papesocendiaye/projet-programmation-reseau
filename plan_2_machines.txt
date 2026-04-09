@@ -1,0 +1,193 @@
+=====================================================================
+  PLAN : Distribution du jeu sur 2 machines physiques
+=====================================================================
+  A NE PAS IMPLEMENTER MAINTENANT - plan de reflexion uniquement
+
+
+1. PRINCIPE GENERAL
+--------------------
+  Machine A (equipe Rouge)              Machine B (equipe Bleue)
+  ========================              ========================
+  Python : ia1 active (Rouge)           Python : ia2 active (Bleue)
+           ia2 ne joue JAMAIS                    ia1 ne joue JAMAIS
+
+  net_sync envoie :                     net_sync envoie :
+    MOVE/SPAWN  -> seulement Rouge        MOVE/SPAWN  -> seulement Bleue
+    ATTACK/DEATH -> toutes les unites     ATTACK/DEATH -> toutes les unites
+
+  net_sync recoit et applique TOUT      net_sync recoit et applique TOUT
+
+  C relay -------- UDP port 6000 ----------- C relay
+  (port 5000/5001)                           (port 5000/5001)
+
+Chaque machine a une copie COMPLETE de l'etat (carte + toutes unites).
+L'IA locale decide seulement pour ses propres unites.
+Les changements adverses arrivent par le reseau.
+
+
+2. BUG CRITIQUE A CORRIGER D'ABORD
+------------------------------------
+Dans partie_c/main.c ligne 103 :
+  sendto(sock_ia, buffer, len, 0, (struct sockaddr*)&addr_ia, sizeof(addr_ia))
+
+addr_ia = 127.0.0.1:5000 (le port du C lui-meme !!)
+Il faut envoyer a 127.0.0.1:5001 (le port d'ecoute de Python)
+
+FIX : creer une variable addr_python_out sur le port 5001 :
+  struct sockaddr_in addr_python_out;
+  addr_python_out.sin_family = AF_INET;
+  addr_python_out.sin_addr.s_addr = inet_addr("127.0.0.1");
+  addr_python_out.sin_port = htons(5001);
+
+  // ligne 103 : remplacer addr_ia par addr_python_out
+  sendto(sock_ia, buffer, len, 0,
+         (struct sockaddr*)&addr_python_out, sizeof(addr_python_out));
+
+
+3. MODIFICATIONS PAR FICHIER
+------------------------------
+
+  3.1  partie_c/main.c
+       - Corriger le bug de forwarding (port 5001)
+       - Optionnel : rendre les ports configurables via argv
+         pour tester 2 instances sur la meme machine
+
+  3.2  battle/engine.py
+       - Ajouter attribut local_team (None/'R'/'B') au constructeur
+       - Modifier process_turn() : ne faire jouer l'IA que pour local_team
+           if self.local_team is None or self.local_team == 'R':
+               self.ia1.play_turn(unit, self.current_turn)
+       - Modifier process_spawns() : ne spawner que les unites locales
+           if self.local_team is not None and team != self.local_team:
+               self.spawn_queue.pop(0)
+               continue  # les unites adverses arrivent par SPAWN reseau
+       - Passer local_team et ports a init_network()
+
+  3.3  battle/net_sync.py
+       - Ajouter local_team et ports au constructeur
+       - send_updates() : MOVE et SPAWN -> seulement equipe locale
+                          ATTACK et DEATH -> toutes les unites modifiees
+         (car Machine A inflige des degats aux Bleus, il faut le dire a B)
+       - receive_updates() : appliquer TOUS les messages sans filtre
+
+  3.4  main.py
+       - Ajouter --team R/B (implique --network automatiquement)
+       - Ajouter --port-c et --port-listen (optionnel, pour tests locaux)
+
+
+4. POURQUOI ENVOYER ATTACK/DEATH POUR TOUTES LES UNITES ?
+-----------------------------------------------------------
+Quand l'IA Rouge de Machine A attaque une unite Bleue :
+  1. attack2() est appele localement sur Machine A
+  2. take_damage() reduit les HP de l'unite Bleue sur Machine A
+  3. Machine A doit envoyer ATTACK(B_K_3, hp=nouveau) a Machine B
+  4. Machine B recoit et met a jour les HP de B_K_3
+
+Si on ne filtrait que par equipe locale, Machine A n'enverrait jamais
+les degats infliges aux Bleus. Les Bleus seraient immortels sur Machine B.
+
+IMPORTANT : le message ATTACK contient le HP ABSOLU (pas les degats).
+Donc pas de risque de double application.
+
+
+5. IDENTIFIANTS D'UNITES (unit_id)
+------------------------------------
+Format actuel : "{team}_{type}_{counter}" ex: R_K_0, B_C_3
+
+En distribue :
+  Machine A spawne : R_K_0, R_C_1, R_C_2, ...
+  Machine B spawne : B_K_0, B_C_1, B_P_2, ...
+
+Le prefixe d'equipe (R_ vs B_) garantit l'unicite globale.
+Pas de modification necessaire.
+
+
+6. SYNCHRONISATION INITIALE
+-----------------------------
+Les deux machines chargent le MEME scenario independamment.
+Chacune construit la spawn_queue identique.
+Chacune ne spawne que les unites de son equipe.
+Les unites adverses arrivent par messages SPAWN du reseau.
+
+Prerequis : meme fichier de scenario sur les deux machines
+(copier data/scenario/ ou partager le depot git).
+
+
+7. PROCEDURE DE LANCEMENT
+---------------------------
+
+=== Machine A (192.168.1.10) - equipe Rouge ===
+
+  Terminal 1 : lancer le relais C
+    cd partie_c
+    ./main.exe 192.168.1.20
+
+  Terminal 2 : lancer le jeu Python
+    python main.py battle run stest1 Major_DAFT Major_DAFT --team R
+
+=== Machine B (192.168.1.20) - equipe Bleue ===
+
+  Terminal 1 : lancer le relais C
+    cd partie_c
+    ./main.exe 192.168.1.10
+
+  Terminal 2 : lancer le jeu Python
+    python main.py battle run stest1 Major_DAFT Major_DAFT --team B
+
+ORDRE : lancer les 2 relais C d'abord (ils echangent HELLO),
+        puis les 2 Python (l'ordre entre A et B n'importe pas).
+
+Note : le nom de ia2 sur Machine A est ignore (son play_turn ne sera
+jamais appele). On peut mettre n'importe quel nom valide.
+
+
+8. TEST LOCAL AVEC 2 PROCESSUS (MEME MACHINE)
+-----------------------------------------------
+Pour tester sans 2 machines, utiliser des ports differents :
+
+  Instance A (Rouge) :
+    C relay : IPC=5000, reseau=6000, forward=5001, peer=127.0.0.1:6001
+    Python  : ecoute=5001, envoie=5000
+
+  Instance B (Bleue) :
+    C relay : IPC=5002, reseau=6001, forward=5003, peer=127.0.0.1:6000
+    Python  : ecoute=5003, envoie=5002
+
+  Commandes :
+    ./main.exe 127.0.0.1 5000 6000 5001 6001
+    ./main.exe 127.0.0.1 5002 6001 5003 6000
+    python main.py battle run stest1 ... --team R --port-c 5000 --port-listen 5001
+    python main.py battle run stest1 ... --team B --port-c 5002 --port-listen 5003
+
+  (Necessite que main.c accepte les ports en arguments)
+
+
+9. ORDRE D'IMPLEMENTATION RECOMMANDE
+--------------------------------------
+  1. Corriger le bug main.c (forward port 5001)
+  2. Ajouter local_team a engine.py + filtrage process_turn()
+  3. Tester : --team R sans reseau -> Rouges bougent, Bleus immobiles
+  4. Ajouter filtrage dans net_sync.py (envoi par equipe)
+  5. Modifier process_spawns() (spawn equipe locale seulement)
+  6. Arguments CLI dans main.py
+  7. Test local 2 processus
+  8. Test 2 machines physiques
+
+
+10. PIEGES A EVITER
+---------------------
+  - Pare-feu Windows : ouvrir UDP port 6000 en entrant sur les 2 machines
+  - Les 2 machines doivent avoir le meme fichier de scenario
+  - Ne pas oublier de lancer le C relay AVANT le Python
+  - Perte de paquets UDP : un DEATH perdu = unite zombie sur la machine
+    distante. Mitigation : renvoyer DEATH pendant quelques ticks.
+  - Latence typique LAN : 1-5ms. A 60 TPS (16ms/tick), le decalage
+    visuel est de 1-2 ticks, quasi imperceptible.
+
+
+11. RESUME
+-----------
+  Fichiers a modifier : 4 (main.c, engine.py, net_sync.py, main.py)
+  Fichiers inchanges  : protocol.py, protocol.h, client.py, unit.py, IAs
+  Nouveau fichier     : aucun
+  Effort estime       : moyen (la base V1 est deja faite)

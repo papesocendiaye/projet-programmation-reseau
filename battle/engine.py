@@ -118,12 +118,16 @@ class Engine:
         self.spawn_interval = 0.15  # spawn une unite toutes les 150ms
         self.time_since_last_spawn = 0.0
         self.unit_id_counter = 0
+        self.net_sync = None  # initialise par init_network()
 
     def initialize_units(self):
         """charge la liste d'unite"""
         for (x,y) in self.game_map.map:
-            self.game_map.get_unit(x,y).direction = (0,0)
-            self.units.append(self.game_map.get_unit(x,y))
+            unit = self.game_map.get_unit(x,y)
+            unit.direction = (0,0)
+            unit.unit_id = f"{unit.team}_{unit.type}_{self.unit_id_counter}"
+            self.unit_id_counter += 1
+            self.units.append(unit)
 
     def load_scenario(self):
         """Charge le scénario depuis le fichier"""
@@ -194,6 +198,22 @@ class Engine:
             if unit.unit_id == unit_id:
                 return unit
         return None
+
+    def init_network(self):
+        """Initialise la synchronisation reseau V1 (best-effort)."""
+        from battle.net_sync import NetSync
+        self.net_sync = NetSync(self)
+        print("[NET] Synchronisation reseau initialisee (V1 best-effort)")
+
+    def _net_receive(self):
+        """Recevoir les MAJ distantes si le reseau est actif."""
+        if self.net_sync:
+            self.net_sync.receive_updates()
+
+    def _net_send(self):
+        """Envoyer les changements locaux si le reseau est actif."""
+        if self.net_sync:
+            self.net_sync.send_updates()
 
 
     def initialize_ai(self):
@@ -277,12 +297,14 @@ class Engine:
         while self.is_running:
             turn_start = time.time()
             if self.tournaments:
+                self._net_receive()
                 self.process_turn()
                 self.process_spawns()
                 self.check_victory()
                 self.current_turn += 1
                 self.update_units(1 / 60)
                 self.update_projectiles()
+                self._net_send()
                 turn_time = time.time() - turn_start
                 if turn_time > 0:
                     self.tab_game_tps.append((1.0 / turn_time))
@@ -320,6 +342,7 @@ class Engine:
                         #print(1/max_turn_time)
                         ##################################################################
 
+                    self._net_receive()
                     self.process_turn()
                     self.process_spawns()
                     # 1. Gérer les entrées
@@ -336,6 +359,7 @@ class Engine:
                     # 5 mets a jour les unités
                     self.update_units(1 / 60)
                     self.update_projectiles()
+                    self._net_send()
                     # 5. Contrôle du turn rate
                     self.turn_time = time.time() - turn_start
                     if self.view and self.turn_time < max_turn_time:

@@ -11,7 +11,8 @@ typedef enum {
     ACTION_ATTACK, 
     ACTION_SPAWN, 
     ACTION_REQ_OWNERSHIP,
-    ACTION_HELLO  // <-- NOUVEAU : Message de connexion P2P
+    ACTION_HELLO,  // <-- NOUVEAU : Message de connexion P2P
+    ACTION_DEATH   // Mort d'une unité (V1 MAJ)
 } ActionType;
 
 typedef struct {
