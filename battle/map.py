@@ -55,7 +55,10 @@ class Map:
         """Permet de retirer l'unité à la position (x, y)"""
         if (x, y) in self.map:
             self.map.pop((x, y), None)
-
+    def load_dimensions(self, scenario_name):
+        """Charge uniquement les dimensions de la carte depuis un scénario"""
+        size, scenario = Scenario().get_list_by_name(scenario_name)
+        self.p, self.q = size
     def load(self, scenario_name):
         """"Charge une carte depuis un scénario donné ou un fichier de sauvegarde"""
 

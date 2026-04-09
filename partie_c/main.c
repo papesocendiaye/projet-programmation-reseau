@@ -2,6 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include "protocol.h"
+#ifdef _WIN32
+    typedef int socklen_t;
+#endif
 
 #ifdef _WIN32
     #include <winsock2.h>
@@ -44,6 +47,7 @@ int main(int argc, char *argv[]) {
     int sock_ia = socket(AF_INET, SOCK_DGRAM, 0);
     int sock_reseau = socket(AF_INET, SOCK_DGRAM, 0);
 
+    struct sockaddr_in addr_ia, addr_res;
     struct sockaddr_in addr_ia, addr_res, sender_addr;
     socklen_t addr_len = sizeof(sender_addr);
     char buffer[MAX_BUFFER_SIZE];
@@ -75,6 +79,18 @@ int main(int argc, char *argv[]) {
         add_peer(first_peer);
     }
 
+    // --- NOUVEAU : Variables pour mémoriser l'adresse du script Python ---
+    struct sockaddr_in python_client_addr;
+    int python_connected = 0;
+
+    fd_set readfds;
+    while (1) {
+        FD_ZERO(&readfds);
+        FD_SET(sock_ia, &readfds);
+        FD_SET(sock_reseau, &readfds);
+        int max_fd = (sock_ia > sock_reseau) ? sock_ia : sock_reseau;
+
+
     fd_set readfds;
     while (1) {
         FD_ZERO(&readfds);
@@ -86,6 +102,14 @@ int main(int argc, char *argv[]) {
 
         // CAS 1 : L'IA locale envoie un ordre -> On le broadcast au réseau
         if (FD_ISSET(sock_ia, &readfds)) {
+            struct sockaddr_in sender_addr;
+            socklen_t sender_len = sizeof(sender_addr);
+            int len = recvfrom(sock_ia, buffer, MAX_BUFFER_SIZE-1, 0, (struct sockaddr*)&sender_addr, &sender_len);
+            
+            // On mémorise dynamiquement le port du Python (5001 ou 5002)
+            python_client_addr = sender_addr;
+            python_connected = 1;
+
             int len = recvfrom(sock_ia, buffer, MAX_BUFFER_SIZE-1, 0, NULL, NULL);
             for (int i=0; i<MAX_PEERS; i++) {
                 if (lobby[i].active) sendto(sock_reseau, buffer, len, 0, (struct sockaddr*)&lobby[i].addr, sizeof(lobby[i].addr));
@@ -94,10 +118,18 @@ int main(int argc, char *argv[]) {
 
         // CAS 2 : Message du réseau -> On l'ajoute au carnet ou on l'envoie à l'IA
         if (FD_ISSET(sock_reseau, &readfds)) {
+            struct sockaddr_in sender_addr;
+            socklen_t addr_len = sizeof(sender_addr);
             int len = recvfrom(sock_reseau, buffer, MAX_BUFFER_SIZE-1, 0, (struct sockaddr*)&sender_addr, &addr_len);
             buffer[len] = '\0';
             Message m;
             if (deserialize_message(buffer, &m)) {
+                if (m.action == ACTION_HELLO) {
+                    add_peer(sender_addr);
+                } else if (python_connected) {
+                    // CORRECTION : On envoie au Python, pas à nous-même !
+                    sendto(sock_ia, buffer, len, 0, (struct sockaddr*)&python_client_addr, sizeof(python_client_addr));
+                }
                 if (m.action == ACTION_HELLO) add_peer(sender_addr);
                 else sendto(sock_ia, buffer, len, 0, (struct sockaddr*)&addr_ia, sizeof(addr_ia));
             }

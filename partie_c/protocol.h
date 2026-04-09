@@ -11,7 +11,7 @@ typedef enum {
     ACTION_ATTACK, 
     ACTION_SPAWN, 
     ACTION_REQ_OWNERSHIP,
-    ACTION_HELLO  // <-- NOUVEAU : Message de connexion P2P
+    ACTION_HELLO 
 } ActionType;
 
 typedef struct {

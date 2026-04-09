@@ -1,5 +1,3 @@
-
-
 from battle.map import Map
 import time
 import sys, os
@@ -7,12 +5,25 @@ import sys, os
 if os.name != 'nt':
     import termios
     import tty
+else:
+    termios = None
+    tty = None
 from collections import deque
 from random import randint
 from numpy import mean
 
 from ia.registry import AI_REGISTRY
 from reports.reporter import generate_report 
+
+### NOUVEAU : IMPORTATIONS POUR LE RÉSEAU ###
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+try:
+    from partie_c.client import IPCClient
+    from partie_c.protocol import Message, ActionType
+except ImportError:
+    print("[!] Attention : client.py ou protocol.py introuvables. Le réseau sera désactivé.")
+    IPCClient, Message, ActionType = None, None, None
+#############################################
 
 def fix_string(string):
     """Transforme une chaîne de caractères en une version "fixe" (minuscules, sans espaces ou caractères spéciaux)"""
@@ -65,7 +76,8 @@ def randomize_order(units):
 
 
 class Engine:
-    def __init__(self, scenario, ia1, ia2, view_type, tournaments=False):
+    ### NOUVEAU : Ajout de local_team en paramètre ###
+    def __init__(self, scenario, ia1, ia2, view_type, tournaments=False, local_team='R'):
 
         self.scenario_name = scenario
         self.ia1 = fix_string(ia1)
@@ -109,6 +121,28 @@ class Engine:
         self.turn_fps = 0
         self.time_turn = 0
         self.units = []
+        
+        # spawn
+        self.spawn_queue = []
+        self.spawn_interval = 0.15  # spawn une unite toutes les 150ms
+        self.time_since_last_spawn = 0.0
+        self.unit_id_counter = 0
+
+        ### NOUVEAU : Initialisation IPC ###
+        self.local_team = local_team # 'R' ou 'B'
+        self.player_id = 1 if local_team == 'R' else 2
+        
+        if IPCClient:
+            try:
+                port_ecoute = 5001 if local_team == 'R' else 5002
+                self.ipc = IPCClient(port_ecoute=port_ecoute, port_c=5000)
+                print(f"[RESEAU] IPC Connecté pour l'équipe {self.local_team} sur le port {port_ecoute}")
+            except Exception as e:
+                print(f"[RESEAU] Erreur de connexion IPC : {e}")
+                self.ipc = None
+        else:
+            self.ipc = None
+        ####################################
 
     def initialize_units(self):
         """charge la liste d'unite"""
@@ -121,8 +155,99 @@ class Engine:
 
         if not self.tournaments: print(f"Loading scenario: {self.scenario_name}")
         self.game_map = Map()
+    
         Map.load(self.game_map, self.scenario_name)
+        if not self.tournaments: 
+           self.build_spawn_queue()
 
+    def build_spawn_queue(self):
+        """Construit la file de spawn progressive en alternant R et B"""
+        from battle.scenario import Scenario
+        _, scenario = Scenario().get_list_by_name(self.scenario_name)
+
+        red_units = []
+        blue_units = []
+
+        if "lanchester" in self.scenario_name:
+            for x, y, unit_type in scenario:
+                if x < self.game_map.p // 2:
+                    red_units.append((x, y, unit_type, 'R'))
+                else:
+                    blue_units.append((x, y, unit_type, 'B'))
+        else:
+            for x, y, unit_type in scenario:
+                red_units.append((x, y, unit_type, 'R'))
+                blue_units.append((self.game_map.p - x, y, unit_type, 'B'))
+
+        # Alterner R et B pour l'équité
+        self.spawn_queue = []
+        max_len = max(len(red_units), len(blue_units))
+        for i in range(max_len):
+            if i < len(red_units):
+                self.spawn_queue.append(red_units[i])
+            if i < len(blue_units):
+                self.spawn_queue.append(blue_units[i])
+
+    def process_spawns(self):
+        """Fait apparaitre les unités progressivement"""
+        if not self.spawn_queue:
+            return
+        self.time_since_last_spawn += 1.0 / 60.0
+        while self.time_since_last_spawn >= self.spawn_interval and self.spawn_queue:
+            self.time_since_last_spawn -= self.spawn_interval
+            x, y, unit_type, team = self.spawn_queue.pop(0)
+            self.game_map.add_unit(x, y, unit_type, team)
+            new_unit = self.game_map.get_unit(x, y)
+            if new_unit and new_unit not in self.units:
+                new_unit.direction = (0, 0)
+                # Assigner l'identifiant réseau unique
+                new_unit.unit_id = f"{team}_{unit_type}_{self.unit_id_counter}"
+                self.unit_id_counter += 1
+                self.units.append(new_unit)
+                self.ia1.initialize()
+                self.ia2.initialize()
+                
+                ### NOUVEAU : Annoncer le SPAWN au réseau si c'est notre équipe ###
+                if self.ipc and team == self.local_team:
+                    msg = Message(
+                        id_joueur=self.player_id,
+                        pos_x=x,
+                        pos_y=y,
+                        action=ActionType.SPAWN,
+                        target_id=new_unit.unit_id
+                    )
+                    self.ipc.send_action(msg)
+                ####################################################################
+
+    def find_unit_by_id(self, unit_id):
+        """Trouve une unité par son identifiant réseau"""
+        for unit in self.units:
+            if unit.unit_id == unit_id:
+                return unit
+        return None
+
+    ### NOUVEAU : Méthode de traitement réseau ###
+    def apply_network_message(self, msg):
+        """Applique brutalement les actions distantes"""
+        if msg.action == ActionType.MOVE or msg.action == ActionType.SPAWN:
+            unit = self.find_unit_by_id(msg.target_id)
+            if unit:
+                unit.position = (msg.pos_x, msg.pos_y)
+            elif msg.action == ActionType.SPAWN:
+                # Concurrence sauvage : on ajoute l'unité ennemie manquante
+                print(f"[RESEAU] ⚠️ Apparition sauvage de {msg.target_id} en {msg.pos_x},{msg.pos_y}")
+                # On essaie d'extraire l'équipe et le type depuis l'ID (ex: B_soldat_1)
+                parts = msg.target_id.split('_')
+                team = parts[0] if len(parts) > 0 else 'B'
+                u_type = parts[1] if len(parts) > 1 else 'unknown'
+                
+                self.game_map.add_unit(msg.pos_x, msg.pos_y, u_type, team)
+                new_unit = self.game_map.get_unit(msg.pos_x, msg.pos_y)
+                if new_unit and new_unit not in self.units:
+                    new_unit.direction = (0, 0)
+                    new_unit.unit_id = msg.target_id
+                    self.units.append(new_unit)
+    ##############################################
 
     def initialize_ai(self):
         """Initialise les deux IA"""
@@ -139,7 +264,6 @@ class Engine:
         
         if not self.tournaments: print(f"Initializing AIs: {self.ia1.name} vs {self.ia2.name}")
         pass
-    
     
     def start(self):
         """Démarre la simulation de bataille"""
@@ -159,12 +283,12 @@ class Engine:
 
                 if (not self.tournaments) or self.view_type > 0:
                     self.initialize_view()
-                self.initialize_units()
+               # self.initialize_units()
 
                 self.is_running = True
                 self.star_execution_time = time.time()
 
-                randomize_order(self.units)
+              #  randomize_order(self.units)
 
                 # Boucle principale
                 self.game_loop()
@@ -202,10 +326,19 @@ class Engine:
 
         next_view_time = time.time()
 
-        while self.is_running and self.current_turn < self.max_turns:
+        while self.is_running:
             turn_start = time.time()
+
+            ### NOUVEAU : Lecture Réseau à chaque tour ###
+            if self.ipc:
+                messages = self.ipc.get_pending_messages()
+                for msg in messages:
+                    self.apply_network_message(msg)
+            ##############################################
+
             if self.tournaments:
                 self.process_turn()
+                self.process_spawns()
                 self.check_victory()
                 self.current_turn += 1
                 self.update_units(1 / 60)
@@ -220,9 +353,6 @@ class Engine:
                     #####             - FPS throttling -          ########
                     #####      " C'est moche mais ca marche "     ########
                     ######################################################
-                    # FPS jamais au dessus de  TPS
-                    # FPS jamais au dessus de  max_fps
-                    # FPS jamais en dessous de min_fps, sauf si TPS < min_fps
                     if self.view_type > 1 and self.current_turn % 5 == 0:
 
                         if self.real_tps == 0: tps =60 
@@ -232,22 +362,16 @@ class Engine:
                             perf =1
                         else: perf = tps / (self.tps)  # stabilise autour de tps cible
                         
-                        #self.turn_time_target = 1.0 / max(self.tps,1)
-                        #print(perf)
-
                         view_frame_time= max(min(( view_frame_time / perf), self.max_frame_delay), self.min_frame_delay)
 
                         self.turn_time_target = max(min(( self.turn_time_target * perf), 1/(self.tps+3)), 1/(self.tps+30))
-                        
                         
                         view_frame_time =max( 1/tps , view_frame_time)   #fps jamais > tps
                         self.turn_fps = 1 / view_frame_time
                         max_turn_time = self.turn_time_target 
 
-                        #print(1/max_turn_time)
-                        ##################################################################
-
                     self.process_turn()
+                    self.process_spawns()
                     # 1. Gérer les entrées
                     if self.view_type == 1:
                         self.handle_input()
@@ -288,8 +412,6 @@ class Engine:
                         self.tab_game_tps.append((1.0 / turn_time_plusp))
 
 
-
-        
     def update_units(self,time_per_tick):
         for unit in self.units:
             unit.update(time_per_tick)
@@ -351,11 +473,9 @@ class Engine:
                 print(f"[LOAD] Loading saved battle from: {name}_save")
                 print(f"      ias: {ia1} vs {ia2}")
                 view_type = 2
-                engine = Engine(name, ia1, ia2, view_type)
+                engine = Engine(name, ia1, ia2, view_type, local_team=self.local_team)
                 engine.start()
         pass
-
-
 
     def process_turn(self):
         """Traite un tour de jeu (déplacements, combats, etc.)"""
@@ -366,10 +486,29 @@ class Engine:
                 continue
             if unit.team == 'R':
                 red_alive += 1
-                self.ia1.play_turn(unit, self.current_turn)
             elif unit.team == 'B':
                 blue_alive += 1
-                self.ia2.play_turn(unit, self.current_turn)
+
+            ### NOUVEAU : L'IA ne joue que notre équipe, et on envoie le résultat ! ###
+            if unit.team == self.local_team:
+                old_pos = unit.position
+
+                if unit.team == 'R':
+                    self.ia1.play_turn(unit, self.current_turn)
+                elif unit.team == 'B':
+                    self.ia2.play_turn(unit, self.current_turn)
+
+                # Si l'unité a bougé, on envoie la position au client C
+                if self.ipc and unit.position != old_pos:
+                    msg = Message(
+                        id_joueur=self.player_id,
+                        pos_x=unit.position[0],
+                        pos_y=unit.position[1],
+                        action=ActionType.MOVE,
+                        target_id=str(unit.unit_id)
+                    )
+                    self.ipc.send_action(msg)
+            ############################################################################
 
         # Enregistre l'historique pour Lanchester (tous les 10 tours pour ne pas trop alourdir)
         if "lanchester" in self.scenario_name.lower() and self.current_turn % 10 == 0:
@@ -427,7 +566,7 @@ class Engine:
                 print(f"[LOAD] Loading saved battle from: {name}_save")
                 print(f"      ias: {ia1} vs {ia2}")
                 view_type = 2
-                engine = Engine(name, ia1, ia2, view_type)
+                engine = Engine(name, ia1, ia2, view_type, local_team=self.local_team)
                 engine.start()
 
             if a["increase_speed"]:
@@ -445,8 +584,6 @@ class Engine:
 
         pass
 
-
-
     def get_game_info(self):
         """Retourne les informations de jeu à afficher"""
 
@@ -461,14 +598,13 @@ class Engine:
             'units_ia2': len([u for u in self.units if u.team == 'B' and u.is_alive]),
             #'units_ia2_hp': sum(u.current_hp for u in self.units if u.team == 'B' and u.is_alive),
             'target_tps' : self.tps,
-            'real_tps': mean(self.tab_tps_affichage),
+            'real_tps': mean(self.tab_tps_affichage) if len(self.tab_tps_affichage) > 0 else 0,
             'turn_fps': round(self.turn_fps),
             'time_from_start': f'{(time.time() - self.star_execution_time):.2f}s',
             'in_game_time': f'{(self.current_turn / 60):.2f}s',
             'performance': f'{round(self.real_tps*100 / 60)}%',
             'time_delta': f'{((self.current_turn / 60)-(time.time() - self.star_execution_time)):.2f}s',
         }
-
 
     def check_victory(self):
         """Vérifie les conditions de victoire"""
@@ -477,22 +613,14 @@ class Engine:
         units_team1 = len([u for u in self.units if u.team == 'R' and u.is_alive])
         units_team2 = len([u for u in self.units if u.team == 'B' and u.is_alive])
 
-        # selection du winner gagne si tout les adverse sont mort
+        # On conserve le calcul du gagnant, mais on ne stoppe plus automatiquement la simulation.
         if units_team1 == 0 and units_team2 == 0:
             self.winner = None
-            self.is_running = False
         elif units_team1 == 0:
             self.winner = self.ia2
-            self.is_running = False
         elif units_team2 == 0:
             self.winner = self.ia1
-            self.is_running = False
-
-        if self.current_turn > self.max_turns:
-            self.winner = None
-            self.is_running = False
         pass
-
 
     def end_battle(self):
         """Termine la bataille et affiche les résultats"""
