@@ -1,6 +1,8 @@
 import json
 import os
 import math
+from partie_c.protocol import ActionType
+from partie_c.network import local_player_id
 
 class Unit:
     #on crée une variable dans laquelle on met le contenu de units.json ; agit comme une mémoire cache qui nous évite d'avoir à rouvrir le fichier chaque fois qu'on a besoin de piocher des données dedans
@@ -41,6 +43,9 @@ class Unit:
         # atack timming
         self.time_until_next_attack = 0
         self.time_before_next_attack = self.attack_delay
+
+        self.network_owner = -1  # ID du joueur possédant cette unité (-1 = libre)
+        self.is_locked = False   # Verrouillage local en attente d'une réponse réseau
         
     #charge le fichier units.json
     def load_unit_data(self):
@@ -51,6 +56,39 @@ class Unit:
         with open(path, 'r') as f:  #permet de s'assurer la fermeture du fichier meme en cas de crash
             self.UNIT_CONFIG = json.load(f)
         # print(f"Unités chargées depuis {path}.")
+
+    #méthode de déplacement d'une unité qui prend en compte la synchronisation réseau
+    def move(self, target_pos):
+        if self.network_owner == local_player_id:
+        # On possède l'unité, on peut la déplacer et diffuser sa position
+            self._execute_move(target_pos)
+            self.network_manager.broadcast_move(self.id, target_pos)
+        else:
+            # On ne possède pas l'unité, on demande la propriété
+            if not self.is_locked:
+                self.is_locked = True
+                self.network_manager.request_ownership(self.id, ActionType.MOVE, target_pos)
+    
+    #méthode d'attaque d'une unité qui prend en compte la synchronisation réseau
+    def attack(self, target_unit):
+        if self.network_owner == local_player_id:
+            # L'attaquant est à moi
+            damage = self.calculate_damage(target_unit)
+            # On envoie un événement d'attaque au réseau
+            # Le propriétaire de target_unit appliquera les dégâts
+            self.network_manager.broadcast_attack(self.id, target_unit.id, damage)
+        else:
+            # Je demande la propriété pour pouvoir ordonner l'attaque
+            self.network_manager.request_ownership(self.id, ActionType.ATTACK, target_unit.id)
+
+    #méthode de calcul des dégâts d'une attaque
+    def apply_network_event(self, action_type, data):
+        if action_type == ActionType.SYNC_STATE:
+            self.hp = data['hp']
+            self.pos = data['pos']
+        elif action_type == ActionType.GIVE_OWNERSHIP:
+            self.network_owner = data['new_owner']
+            self.is_locked = False
 
     #méthode permettant de créer les objets unités
     def get_by_type(self, type, team, position):
