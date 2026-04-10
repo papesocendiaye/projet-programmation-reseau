@@ -233,7 +233,6 @@ class Engine:
     def apply_network_message(self, msg):
         """Applique les actions distantes, les tirs, les décès ET les apparitions tardives"""
         unit = self.find_unit_by_id(msg.target_id)
-        
         # 1. CONCURRENCE SAUVAGE : On reçoit un soldat inconnu ? On le crée direct !
         if not unit and msg.pos_x != -1000:
             parts = msg.target_id.split('_')
@@ -296,6 +295,15 @@ class Engine:
                             self.speed = 0
                     self.game_map.fire_projectile(unit, MockTarget((msg.pos_x, msg.pos_y)))
                     unit.time_until_next_attack = unit.reload_time
+
+        if msg.action == ActionType.DIE:
+            if unit:
+                unit.is_alive = False
+                self.game_map.remove_unit_obj(unit) # Nettoyage physique de la carte
+                if unit in self.units:
+                    self.units.remove(unit)
+
+
     def initialize_ai(self):
         if self.ia1 not in AI_REGISTRY: raise ValueError(f"IA '{self.ia1}' non reconnue.")
         if self.ia2 not in AI_REGISTRY: raise ValueError(f"IA '{self.ia2}' non reconnue.") 
@@ -609,7 +617,12 @@ class Engine:
                 nouvel_etat = "COMBAT EN COURS"
             else:
                 nouvel_etat = "EGALITE (ARENE VIDE)"
-        
+                
+            # Si le statut change, on prévient le terminal
+            if hasattr(self, 'winner_state') and self.winner_state != nouvel_etat:
+                print(f"\n[JEU] ---> ETAT DU MATCH : {nouvel_etat} <---")
+            self.winner_state = nouvel_etat
+
         # Envoi d'un message GAME OVER à l'adversaire quand on perd (0 unité restante), pour qu'il puisse afficher sa victoire même si on ne voit plus nos unités
         if units_team1 == 0 and self.winner_state != "DEFAITE":
             self.winner_state = "DEFAITE"
@@ -617,11 +630,6 @@ class Engine:
                 # Envoyer au partenaire qu'il a gagné
                 msg = Message(self.player_id, -2000, -2000, ActionType.MOVE, "GAME_OVER") 
                 self.ipc.send_action(msg)
-                
-            # Si le statut change, on prévient le terminal
-            if hasattr(self, 'winner_state') and self.winner_state != nouvel_etat:
-                print(f"\n[JEU] ---> ETAT DU MATCH : {nouvel_etat} <---")
-            self.winner_state = nouvel_etat
     ##############################################################################
 
     def end_battle(self):
