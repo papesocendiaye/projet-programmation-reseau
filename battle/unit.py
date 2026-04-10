@@ -2,7 +2,7 @@ import json
 import os
 import math
 from partie_c.protocol import ActionType
-from partie_c.network import local_player_id
+from battle.engine import local_player_id
 
 class Unit:
     #on crée une variable dans laquelle on met le contenu de units.json ; agit comme une mémoire cache qui nous évite d'avoir à rouvrir le fichier chaque fois qu'on a besoin de piocher des données dedans
@@ -44,7 +44,7 @@ class Unit:
         self.time_until_next_attack = 0
         self.time_before_next_attack = self.attack_delay
 
-        self.network_owner = -1  # ID du joueur possédant cette unité (-1 = libre)
+        self.network_owner = team  # ID du joueur possédant cette unité
         self.is_locked = False   # Verrouillage local en attente d'une réponse réseau
         
     #charge le fichier units.json

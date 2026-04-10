@@ -82,6 +82,7 @@ class Engine:
         self.scenario_name = scenario
         self.ia1 = fix_string(ia1)
         self.ia2 = fix_string(ia2)
+        self.local_player_id = 0
 
         self.game_map = None
         self.units = []
