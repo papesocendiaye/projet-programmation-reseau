@@ -609,6 +609,14 @@ class Engine:
                 nouvel_etat = "COMBAT EN COURS"
             else:
                 nouvel_etat = "EGALITE (ARENE VIDE)"
+        
+        # Envoi d'un message GAME OVER à l'adversaire quand on perd (0 unité restante), pour qu'il puisse afficher sa victoire même si on ne voit plus nos unités
+        if units_team1 == 0 and self.winner_state != "DEFAITE":
+            self.winner_state = "DEFAITE"
+            if self.ipc:
+                # Envoyer au partenaire qu'il a gagné
+                msg = Message(self.player_id, -2000, -2000, ActionType.MOVE, "GAME_OVER") 
+                self.ipc.send_action(msg)
                 
             # Si le statut change, on prévient le terminal
             if hasattr(self, 'winner_state') and self.winner_state != nouvel_etat:
