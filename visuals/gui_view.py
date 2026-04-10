@@ -523,6 +523,11 @@ class GUI_view:
             text = self.big_font.render("PAUSE", 1, "white")
             self.screen.blit(text, ((self.max_size[0]-text.get_size()[0])//2, (self.max_size[1]-text.get_size()[1])//2))
 
+        # Affichage Victoire/Défaite
+        if "VICTOIRE" in battle_infos['winner_status'] or "DEFAITE" in battle_infos['winner_status']:
+            color = "green" if "VICTOIRE" in battle_infos['winner_status'] else "red"
+            text = self.big_font.render(battle_infos['winner_status'], 1, color)
+            self.screen.blit(text, ((self.max_size[0]-text.get_size()[0])//2, (self.max_size[1]-text.get_size()[1])//2))
 
     def display(self, map: Map, battle_infos: dict):
         """ Return True si il faut continuer a afficher et False si il faut quitter le gui"""
