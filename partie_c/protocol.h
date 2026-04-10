@@ -3,23 +3,23 @@
 
 #include <stdint.h>
 
-// Mise à jour des actions pour la Version 2
+// Énumération des actions pour la Version 2
 typedef enum { 
     ACTION_MOVE = 0, 
     ACTION_ATTACK = 1, 
     ACTION_SPAWN = 2, 
-    ACTION_REQ_OWNERSHIP = 3, // Demander la propriété réseau [cite: 165]
-    ACTION_ACK_OWNERSHIP = 4, // Transférer la propriété + état [cite: 166]
+    ACTION_REQ_OWNERSHIP = 3, // Demande de propriété
+    ACTION_ACK_OWNERSHIP = 4, // Transfert de propriété + état
     ACTION_HELLO = 5
 } ActionType;
 
-#pragma pack(push, 1) // Force l'alignement binaire strict
+#pragma pack(push, 1) // Force l'alignement binaire sans espaces vides
 typedef struct {
     int32_t id_joueur;
     int32_t pos_x;
     int32_t pos_y;
-    int32_t action;      
-    double  timestamp;   // Pour l'ordre des événements et la cohérence [cite: 80]
+    int32_t action;      // Utilise ActionType
+    double  timestamp;   // Pour la cohérence temporelle (Axe A - Tâche 2)
     char    target_id[32]; 
 } Message;
 #pragma pack(pop)
