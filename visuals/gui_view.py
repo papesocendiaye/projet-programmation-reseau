@@ -430,6 +430,7 @@ class GUI_view:
         # Cercle de couleur pour chaque unité vivante
         for (x, y) in map.map:
             unit = map.get_unit(x, y)
+            if unit is None: continue
             if unit.is_alive: 
                 if unit.team == 'R':
                     color = 'red'
@@ -525,10 +526,14 @@ class GUI_view:
 
     def display(self, map: Map, battle_infos: dict):
         """ Return True si il faut continuer a afficher et False si il faut quitter le gui"""
-        if self.all_units is None:
-            self.all_units = []
-            for (x, y) in map.map:
-                self.all_units.append(map.get_unit(x, y))
+        
+        # --- NOUVEAU : ACTUALISATION DE LA LISTE A CHAQUE FRAME ---
+        self.all_units = []
+        for (x, y) in map.map:
+            u = map.get_unit(x, y)
+            if u is not None:
+                self.all_units.append(u)
+        # ----------------------------------------------------------
 
         self.screen.fill((0,0,0))
         

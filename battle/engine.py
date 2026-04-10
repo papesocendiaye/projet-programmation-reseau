@@ -122,8 +122,15 @@ class Engine:
         if IPCClient:
             try:
                 port_ecoute = 5001 if local_team == 'R' else 5002
-                self.ipc = IPCClient(port_ecoute=port_ecoute, port_c=5000)
-                print(f"[RESEAU] IPC Connecté pour l'équipe {self.local_team} sur le port {port_ecoute}")
+                
+                # --- RETOUR AU VRAI RÉSEAU (2 PC DIFFÉRENTS) ---
+                # Les deux Python envoient à leur programme C respectif (qui écoute sur 5000)
+                port_cible = 5000 
+                
+                self.ipc = IPCClient(port_ecoute=port_ecoute, port_c=port_cible)
+                print(f"[RESEAU] IPC Local OK : J'écoute sur {port_ecoute} et j'envoie au C sur {port_cible}")
+                # ------------------------------------------------------------
+                
             except Exception as e:
                 print(f"[RESEAU] Erreur de connexion IPC : {e}")
                 self.ipc = None
@@ -233,14 +240,36 @@ class Engine:
             team = parts[0] if len(parts) > 0 else 'B'
             u_type = parts[1] if len(parts) > 1 else 'unknown'
             
+            # On désactive la marge de collision de la carte juste le temps de créer l'unité réseau
+            old_marge = self.game_map.marge
+            self.game_map.marge = 0 
             self.game_map.add_unit(msg.pos_x, msg.pos_y, u_type, team)
+            self.game_map.marge = old_marge 
+
             unit = self.game_map.get_unit(msg.pos_x, msg.pos_y)
+            
             if unit and unit not in self.units:
                 print(f"[RESEAU] ⚠️ Joueur distant détecté ! Apparition sauvage de {msg.target_id}")
                 unit.direction = (0, 0)
                 unit.unit_id = msg.target_id
                 unit.last_seen = time.time()
                 self.units.append(unit)
+                
+                # --- CORRECTION 1 : ON RÉVEILLE L'IA ---
+                # On prévient l'IA que de nouveaux ennemis sont sur la carte, 
+                # sinon elle reste aveugle, ne bouge pas et ne tire pas !
+                self.ia1.initialize()
+                self.ia2.initialize()
+                
+                # --- CORRECTION 2 : LE HANDSHAKE (POIGNÉE DE MAIN P2P) ---
+                # Si on voit un ennemi apparaître, c'est qu'il vient de se connecter.
+                # On lui renvoie IMMÉDIATEMENT la position de toute notre armée pour être 
+                # certain qu'il nous affiche sur son écran (et corriger le retard réseau UDP).
+                if self.ipc:
+                    for local_u in self.units:
+                        if local_u.team == self.local_team and local_u.is_alive and hasattr(local_u, 'unit_id'):
+                            ans_msg = Message(self.player_id, int(local_u.position[0]), int(local_u.position[1]), ActionType.MOVE, str(local_u.unit_id))
+                            self.ipc.send_action(ans_msg)
 
         # 2. Maintenant que l'unité existe, on applique ses actions :
         if unit:
@@ -251,11 +280,9 @@ class Engine:
                     unit.current_hp = 0
                     unit.state = "dead"
                 else:
-                    # --- CORRECTIF 2 : MAJ DE LA GRILLE DE LA CARTE ---
                     nouvelle_pos = (msg.pos_x, msg.pos_y)
                     if unit.position != nouvelle_pos:
                         self.game_map.maj_unit_posi(unit, nouvelle_pos)
-                    # --------------------------------------------------
                     unit.last_seen = time.time()
                     
             elif msg.action == ActionType.ATTACK:
@@ -269,7 +296,6 @@ class Engine:
                             self.speed = 0
                     self.game_map.fire_projectile(unit, MockTarget((msg.pos_x, msg.pos_y)))
                     unit.time_until_next_attack = unit.reload_time
-
     def initialize_ai(self):
         if self.ia1 not in AI_REGISTRY: raise ValueError(f"IA '{self.ia1}' non reconnue.")
         if self.ia2 not in AI_REGISTRY: raise ValueError(f"IA '{self.ia2}' non reconnue.") 

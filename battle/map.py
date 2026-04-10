@@ -55,6 +55,12 @@ class Map:
         """Permet de retirer l'unité à la position (x, y)"""
         if (x, y) in self.map:
             self.map.pop((x, y), None)
+    def remove_unit_obj(self, unit):
+        """Retire l'objet unité de la carte (indispensable pour effacer un joueur déconnecté)"""
+        keys_to_remove = [pos for pos, u in self.map.items() if u == unit]
+        for k in keys_to_remove:
+            self.map.pop(k, None)
+        
     def load_dimensions(self, scenario_name):
         """Charge uniquement les dimensions de la carte depuis un scénario"""
         size, scenario = Scenario().get_list_by_name(scenario_name)
