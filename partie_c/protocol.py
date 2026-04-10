@@ -1,5 +1,4 @@
 import struct
-import time
 from dataclasses import dataclass
 from enum import IntEnum
 
@@ -17,15 +16,13 @@ class Message:
     pos_x: int
     pos_y: int
     action: ActionType
-    timestamp: float 
+    timestamp: float
     target_id: str
 
-    # Format binaire : 4 entiers (i), 1 double (d), 32 caractères (32s)
-    # Le '<' indique le format "Little Endian" (standard PC)
-    _FORMAT = "<iiiid32s" 
+    # Format : < (little-endian), iiii (4 int), d (1 double), 32s (string 32 bytes)
+    _FORMAT = "<iiiid32s"
 
     def serialize(self) -> bytes:
-        # Prépare l'ID cible (complété par des zéros binaires)
         target_bytes = self.target_id.encode('utf-8').ljust(32, b'\x00')
         return struct.pack(self._FORMAT, 
                            self.id_joueur, 
@@ -37,10 +34,8 @@ class Message:
 
     @classmethod
     def deserialize(cls, data: bytes):
-        try:
-            unpacked = struct.unpack(cls._FORMAT, data)
-            # On nettoie les zéros binaires pour retrouver le texte
-            target_id = unpacked[5].decode('utf-8').rstrip('\x00')
-            return cls(unpacked[0], unpacked[1], unpacked[2], ActionType(unpacked[3]), unpacked[4], target_id)
-        except Exception as e:
+        if len(data) != struct.calcsize(cls._FORMAT):
             return None
+        unpacked = struct.unpack(cls._FORMAT, data)
+        target_id = unpacked[5].decode('utf-8').rstrip('\x00')
+        return cls(unpacked[0], unpacked[1], unpacked[2], ActionType(unpacked[3]), unpacked[4], target_id)
