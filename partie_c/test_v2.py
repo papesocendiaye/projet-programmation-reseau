@@ -6,18 +6,18 @@ from protocol import Message, ActionType
 ADDR_C = ("127.0.0.1", 5000)
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-print("--- Test Axe A : Envoi Binaire ---")
+print("--- Test de communication Binaire Version 2 ---")
 
-# Création d'un message avec TIMESTAMP (Tâche 2)
+# Création du message avec timestamp actuel
 msg = Message(
-    id_joueur=99,
-    pos_x=450,
-    pos_y=300,
+    id_joueur=1,
+    pos_x=150,
+    pos_y=250,
     action=ActionType.MOVE,
-    timestamp=time.time(), # Voici la preuve du temps
-    target_id="UNITE_TEST_V2"
+    timestamp=time.time(),
+    target_id="CAVALIER_01"
 )
 
-# Envoi
+# Envoi au nœud C
 sock.sendto(msg.serialize(), ADDR_C)
-print(f"Envoyé : ID {msg.id_joueur} à {msg.timestamp}")
+print(f"Message binaire envoyé au C ! (Action: {msg.action.name})")
