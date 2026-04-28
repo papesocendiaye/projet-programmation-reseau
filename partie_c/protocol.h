@@ -1,31 +1,32 @@
 #ifndef PROTOCOL_H
 #define PROTOCOL_H
 
-#include <stdio.h>
-#include <string.h>
+#include <stdint.h> // Indispensable pour utiliser int32_t
 
-#define MAX_BUFFER_SIZE 1024
-#define TARGET_ID_MAX 32
-
+// Énumération des actions pour la Version 2
 typedef enum { 
-    ACTION_MOVE, 
-    ACTION_ATTACK, 
-    ACTION_SPAWN, 
-    ACTION_REQ_OWNERSHIP,
-    ACTION_HELLO 
+    ACTION_MOVE = 0, 
+    ACTION_ATTACK = 1, 
+    ACTION_SPAWN = 2, 
+    ACTION_REQ_OWNERSHIP = 3, // Demande de propriété
+    ACTION_ACK_OWNERSHIP = 4, // Transfert de propriété + état (hp)
+    ACTION_HELLO = 5
 } ActionType;
 
+#pragma pack(push, 1) // Force l'alignement binaire sans espaces vides (VITAL pour Python)
 typedef struct {
-    int id_joueur;
-    int pos_x;
-    int pos_y;
-    ActionType action;
-    char target_id[TARGET_ID_MAX]; // On a agrandi à 32 comme prévu
+    int32_t id_joueur;
+    int32_t pos_x;
+    int32_t pos_y;
+    int32_t hp;          // <-- L'état de la ressource (V2)
+    int32_t action;      // On force sur 32 bits pour la compatibilité Python
+    double  timestamp;   // <-- Pour la cohérence temporelle (V2)
+    char    target_id[32]; 
 } Message;
+#pragma pack(pop)
 
-// Les fonctions de traduction restent les mêmes ! 
-// C'est l'avantage d'avoir bien bossé la Partie C.
-void serialize_message(const Message* msg, char* buffer, size_t buffer_size);
-int deserialize_message(const char* str, Message* msg);
+// On utilise bien les fonctions BINAIRES de la V2
+void serialize_binary(const Message* msg, char* buffer);
+void deserialize_binary(const char* buffer, Message* msg);
 
 #endif

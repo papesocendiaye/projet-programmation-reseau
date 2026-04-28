@@ -204,25 +204,33 @@ class Engine:
 
             self.game_map.add_unit(x, y, unit_type, team)
             new_unit = self.game_map.get_unit(x, y)
+            
             if new_unit and new_unit not in self.units:
                 new_unit.direction = (0, 0)
                 new_unit.unit_id = f"{team}_{unit_type}_{self.unit_id_counter}"
+                
+                # --- NOUVEAU V2 : On prend la propriété réseau de nos soldats ! ---
+                new_unit.network_owner = self.player_id
+                # ------------------------------------------------------------------
+                
                 self.unit_id_counter += 1
                 self.units.append(new_unit)
                 self.ia1.initialize()
                 self.ia2.initialize()
                 
-                ### ANNONCE SPAWN ###
+                ### ANNONCE SPAWN (Mise à jour Format V2) ###
                 if self.ipc and team == self.local_team:
                     msg = Message(
                         id_joueur=self.player_id,
                         pos_x=x,
                         pos_y=y,
+                        hp=new_unit.current_hp,       # <-- Ajout des HP
                         action=ActionType.SPAWN,
+                        timestamp=time.time(),        # <-- Ajout du timestamp
                         target_id=new_unit.unit_id
                     )
                     self.ipc.send_action(msg)
-                #####################
+                ##############################################
 
     def find_unit_by_id(self, unit_id):
         for unit in self.units:
@@ -235,7 +243,7 @@ class Engine:
         unit = self.find_unit_by_id(msg.target_id)
         
         # 1. CONCURRENCE SAUVAGE : On reçoit un soldat inconnu ? On le crée direct !
-        if not unit and msg.pos_x != -1000:
+        if not unit and msg.pos_x > -1000.0:
             parts = msg.target_id.split('_')
             team = parts[0] if len(parts) > 0 else 'B'
             u_type = parts[1] if len(parts) > 1 else 'unknown'
@@ -253,28 +261,41 @@ class Engine:
                 unit.direction = (0, 0)
                 unit.unit_id = msg.target_id
                 unit.last_seen = time.time()
+                
+                # --- NOUVEAU V2 : Propriété par défaut ---
+                # Si c'est un ennemi qui apparait, c'est l'autre joueur qui en a la propriété réseau
+                unit.network_owner = msg.id_joueur 
+                
                 self.units.append(unit)
                 
-                # --- CORRECTION 1 : ON RÉVEILLE L'IA ---
-                # On prévient l'IA que de nouveaux ennemis sont sur la carte, 
-                # sinon elle reste aveugle, ne bouge pas et ne tire pas !
                 self.ia1.initialize()
                 self.ia2.initialize()
                 
-                # --- CORRECTION 2 : LE HANDSHAKE (POIGNÉE DE MAIN P2P) ---
-                # Si on voit un ennemi apparaître, c'est qu'il vient de se connecter.
-                # On lui renvoie IMMÉDIATEMENT la position de toute notre armée pour être 
-                # certain qu'il nous affiche sur son écran (et corriger le retard réseau UDP).
+                # --- CORRECTION DU HANDSHAKE (Format V2) ---
                 if self.ipc:
                     for local_u in self.units:
                         if local_u.team == self.local_team and local_u.is_alive and hasattr(local_u, 'unit_id'):
-                            ans_msg = Message(self.player_id, int(local_u.position[0]), int(local_u.position[1]), ActionType.MOVE, str(local_u.unit_id))
+                            ans_msg = Message(
+                                id_joueur=self.player_id, 
+                                pos_x=local_u.position[0], 
+                                pos_y=local_u.position[1], 
+                                hp=local_u.current_hp,
+                                action=ActionType.MOVE, 
+                                timestamp=time.time(),
+                                target_id=str(local_u.unit_id)
+                            )
                             self.ipc.send_action(ans_msg)
 
         # 2. Maintenant que l'unité existe, on applique ses actions :
         if unit:
+            
+            # --- NOUVEAU V2 : Synchronisation des HP ---
+            # Si on reçoit un message normal et qu'on n'est pas le proprio réseau, on met à jour la barre de vie
+            if getattr(unit, 'network_owner', self.player_id) != self.player_id and msg.hp > 0:
+                unit.current_hp = msg.hp
+
             if msg.action == ActionType.MOVE or msg.action == ActionType.SPAWN:
-                if msg.pos_x == -1000 and msg.pos_y == -1000:
+                if msg.pos_x <= -1000.0 and msg.pos_y <= -1000.0:
                     print(f"[RESEAU] Mort confirmée de l'unité adverse : {msg.target_id}")
                     unit.is_alive = False
                     unit.current_hp = 0
@@ -294,16 +315,47 @@ class Engine:
                             self.position = pos
                             self.direction = (0, 0)
                             self.speed = 0
-                            self.size = 1.0          # Prévient les crashs de collision
-                            self.team = 'None'       # Prévient les crashs d'équipe
-                            self.is_alive = True     # Prévient les crashs d'état
+                            self.size = 1.0          
+                            self.team = 'None'       
+                            self.is_alive = True     
                             
                         def take_damage(self, attacker):
-                            pass # Ne fait rien, évite le crash si appelé par l'engin
-                    
+                            pass 
                     
                     self.game_map.fire_projectile(unit, MockTarget((msg.pos_x, msg.pos_y)))
                     unit.time_until_next_attack = unit.reload_time
+                    
+            # ==========================================
+            #           LE CŒUR DE LA V2 ICI
+            # ==========================================
+            elif msg.action == ActionType.REQ_OWNERSHIP:
+                # L'adversaire veut frapper cette unité. Sommes-nous le propriétaire réseau ?
+                if getattr(unit, 'network_owner', self.player_id) == self.player_id:
+                    print(f"[V2] Cession de la propriété réseau de {unit.unit_id} au joueur {msg.id_joueur}")
+                    # On lui donne la propriété réseau
+                    unit.network_owner = msg.id_joueur
+                    
+                    # On lui envoie l'état exact (HP et position) pour qu'il puisse calculer l'attaque
+                    if self.ipc:
+                        ack_msg = Message(
+                            id_joueur=self.player_id,
+                            pos_x=unit.position[0],
+                            pos_y=unit.position[1],
+                            hp=unit.current_hp,
+                            action=ActionType.ACK_OWNERSHIP,
+                            timestamp=time.time(),
+                            target_id=unit.unit_id
+                        )
+                        self.ipc.send_action(ack_msg)
+                        
+            elif msg.action == ActionType.ACK_OWNERSHIP:
+                # L'adversaire a accepté de nous donner la propriété !
+                print(f"[V2] Propriété réseau acquise pour {unit.unit_id} ! (HP actuels: {msg.hp})")
+                unit.network_owner = self.player_id
+                unit.current_hp = msg.hp
+                nouvelle_pos = (msg.pos_x, msg.pos_y)
+                if unit.position != nouvelle_pos:
+                    self.game_map.maj_unit_posi(unit, nouvelle_pos)
     def initialize_ai(self):
         if self.ia1 not in AI_REGISTRY: raise ValueError(f"IA '{self.ia1}' non reconnue.")
         if self.ia2 not in AI_REGISTRY: raise ValueError(f"IA '{self.ia2}' non reconnue.") 
@@ -500,6 +552,7 @@ class Engine:
 
     ### Emission de Tirs et de Mort ###
     def process_turn(self):
+        import time # Juste au cas où ce n'est pas importé en haut
         red_alive = 0
         blue_alive = 0
         for unit in self.units:
@@ -508,7 +561,16 @@ class Engine:
                 if unit.team == self.local_team and hasattr(unit, 'unit_id'):
                     if unit.unit_id not in self.dead_units_sync:
                         if self.ipc:
-                            msg = Message(self.player_id, -1000, -1000, ActionType.MOVE, str(unit.unit_id))
+                            # --- MISE A JOUR FORMAT V2 ---
+                            msg = Message(
+                                id_joueur=self.player_id, 
+                                pos_x=-1000.0, 
+                                pos_y=-1000.0, 
+                                hp=0.0,
+                                action=ActionType.MOVE, 
+                                timestamp=time.time(),
+                                target_id=str(unit.unit_id)
+                            )
                             self.ipc.send_action(msg)
                         self.dead_units_sync.add(unit.unit_id)
                 continue
@@ -522,21 +584,54 @@ class Engine:
                 if unit.team == 'R': self.ia1.play_turn(unit, self.current_turn)
                 elif unit.team == 'B': self.ia2.play_turn(unit, self.current_turn)
 
+                # ============================================================
+                # --- V2 : GESTION DE L'ATTENTE DE PROPRIÉTÉ RÉSEAU ---
+                # ============================================================
+                if unit.state == "waiting_ownership" and unit.target:
+                    # Pour ne pas spammer le réseau à chaque frame :
+                    if not getattr(unit, 'req_sent', False):
+                        print(f"[V2] {unit.unit_id} demande l'autorisation d'attaquer {unit.target.unit_id}...")
+                        if self.ipc:
+                            msg = Message(
+                                id_joueur=self.player_id, 
+                                pos_x=0.0, 
+                                pos_y=0.0, 
+                                hp=0.0,
+                                action=ActionType.REQ_OWNERSHIP,
+                                timestamp=time.time(),
+                                target_id=str(unit.target.unit_id)
+                            )
+                            self.ipc.send_action(msg)
+                        unit.req_sent = True
+                    continue # L'unité passe son tour en attendant la réponse du réseau
+                # ============================================================
+
                 if self.ipc:
                     if unit.state == "attacking" and unit.target:
+                        # --- MISE A JOUR FORMAT V2 ---
                         msg = Message(
                             id_joueur=self.player_id,
-                            pos_x=int(unit.target.position[0]),
-                            pos_y=int(unit.target.position[1]),
+                            pos_x=unit.target.position[0],
+                            pos_y=unit.target.position[1],
+                            hp=unit.current_hp,
                             action=ActionType.ATTACK,
+                            timestamp=time.time(),
                             target_id=str(unit.unit_id)
                         )
                         self.ipc.send_action(msg)
+                        
                     # --- CORRECTIF 3 : LE BATTEMENT DE COEUR (HEARTBEAT) ---
-                    # On envoie un paquet si l'unité a bougé, OU systématiquement toutes les 30 frames (0.5s)
-                    # Cela empêche l'unité d'être considérée comme "déconnectée" quand elle reste immobile !
                     elif unit.position != old_pos or self.current_turn % 30 == 0:
-                        msg = Message(self.player_id, int(unit.position[0]), int(unit.position[1]), ActionType.MOVE, str(unit.unit_id))
+                        # --- MISE A JOUR FORMAT V2 ---
+                        msg = Message(
+                            id_joueur=self.player_id, 
+                            pos_x=unit.position[0], 
+                            pos_y=unit.position[1], 
+                            hp=unit.current_hp,
+                            action=ActionType.MOVE, 
+                            timestamp=time.time(),
+                            target_id=str(unit.unit_id)
+                        )
                         self.ipc.send_action(msg)
                     # -------------------------------------------------------
 
