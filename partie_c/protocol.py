@@ -16,9 +16,10 @@ class Message:
     action: ActionType
     target_id: str
 
+    
     def serialize(self) -> bytes:
-        # Format simple sans \n (UDP s'occupe de la séparation)
-        msg_str = f"{self.id_joueur}|{int(self.pos_x)}|{int(self.pos_y)}|{self.action.value}|{self.target_id}"
+        # On utilise des float avec 2 ou 3 décimales pour la précision du mouvement
+        msg_str = f"{self.id_joueur}|{self.pos_x:.3f}|{self.pos_y:.3f}|{self.action.value}|{self.target_id}"
         return msg_str.encode('utf-8')
 
     @classmethod
@@ -29,8 +30,8 @@ class Message:
         try:
             return cls(
                 id_joueur=int(parts[0]),
-                pos_x=int(parts[1]),
-                pos_y=int(parts[2]),
+                pos_x=float(parts[1]), # <-- Changé en float
+                pos_y=float(parts[2]), # <-- Changé en float
                 action=ActionType(int(parts[3])),
                 target_id=parts[4],
             )

@@ -294,6 +294,14 @@ class Engine:
                             self.position = pos
                             self.direction = (0, 0)
                             self.speed = 0
+                            self.size = 1.0          # Prévient les crashs de collision
+                            self.team = 'None'       # Prévient les crashs d'équipe
+                            self.is_alive = True     # Prévient les crashs d'état
+                            
+                        def take_damage(self, attacker):
+                            pass # Ne fait rien, évite le crash si appelé par l'engin
+                    
+                    
                     self.game_map.fire_projectile(unit, MockTarget((msg.pos_x, msg.pos_y)))
                     unit.time_until_next_attack = unit.reload_time
     def initialize_ai(self):
