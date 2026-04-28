@@ -1,30 +1,39 @@
 #ifndef PROTOCOL_H
 #define PROTOCOL_H
 
-#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
 
-// Énumération des actions pour la Version 2
+#define MAX_BUFFER_SIZE 1024
+
+// 1. Les types d'actions
 typedef enum { 
-    ACTION_MOVE = 0, 
-    ACTION_ATTACK = 1, 
-    ACTION_SPAWN = 2, 
-    ACTION_REQ_OWNERSHIP = 3, // Demande de propriété
-    ACTION_ACK_OWNERSHIP = 4, // Transfert de propriété + état
-    ACTION_HELLO = 5
+    ACTION_MOVE, 
+    ACTION_ATTACK, 
+    ACTION_SPAWN, 
+    ACTION_REQ_OWNERSHIP 
 } ActionType;
 
-#pragma pack(push, 1) // Force l'alignement binaire sans espaces vides
+// 2. Le format du message
 typedef struct {
-    int32_t id_joueur;
-    int32_t pos_x;
-    int32_t pos_y;
-    int32_t action;      // Utilise ActionType
-    double  timestamp;   // Pour la cohérence temporelle (Axe A - Tâche 2)
-    char    target_id[32]; 
+    int id_joueur;
+    int pos_x;
+    int pos_y;
+    ActionType action;
+    char target_id[16];
 } Message;
-#pragma pack(pop)
 
-void serialize_binary(const Message* msg, char* buffer);
-void deserialize_binary(const char* buffer, Message* msg);
+// 3. Le tampon réseau
+typedef struct {
+    char data[MAX_BUFFER_SIZE];
+    int current_length;
+} TCPBuffer;
 
-#endif
+// 4. Les signatures des fonctions (les "titres")
+void init_buffer(TCPBuffer* buf);
+void add_data(TCPBuffer* buf, const char* new_data, int data_len);
+int get_next_message(TCPBuffer* buf, char* output_msg);
+void serialize_message(const Message* msg, char* buffer, size_t buffer_size);
+int deserialize_message(const char* str, Message* msg);
+
+#endif // PROTOCOL_H

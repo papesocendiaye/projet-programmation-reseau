@@ -1,31 +1,29 @@
 #ifndef PROTOCOL_H
 #define PROTOCOL_H
 
-#include <stdio.h>
-#include <string.h>
-
-#define MAX_BUFFER_SIZE 1024
-#define TARGET_ID_MAX 32
+#include <stdint.h>
 
 typedef enum { 
-    ACTION_MOVE, 
-    ACTION_ATTACK, 
-    ACTION_SPAWN, 
-    ACTION_REQ_OWNERSHIP,
-    ACTION_HELLO 
+    ACTION_MOVE = 0, 
+    ACTION_ATTACK = 1, 
+    ACTION_SPAWN = 2, 
+    ACTION_REQ_OWNERSHIP = 3, 
+    ACTION_ACK_OWNERSHIP = 4, 
+    ACTION_HELLO = 5
 } ActionType;
 
+#pragma pack(push, 1) 
 typedef struct {
-    int id_joueur;
-    int pos_x;
-    int pos_y;
-    ActionType action;
-    char target_id[TARGET_ID_MAX]; // On a agrandi à 32 comme prévu
+    int32_t id_joueur;
+    int32_t pos_x;
+    int32_t pos_y;
+    int32_t action;      
+    double  timestamp;   // <-- LE FAMEUX CHAMP EST ICI
+    char    target_id[32]; 
 } Message;
+#pragma pack(pop)
 
-// Les fonctions de traduction restent les mêmes ! 
-// C'est l'avantage d'avoir bien bossé la Partie C.
-void serialize_message(const Message* msg, char* buffer, size_t buffer_size);
-int deserialize_message(const char* str, Message* msg);
+void serialize_binary(const Message* msg, char* buffer);
+void deserialize_binary(const char* buffer, Message* msg);
 
 #endif
