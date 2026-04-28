@@ -54,7 +54,7 @@ int main(int argc, char *argv[]) {
         p.sin_family = AF_INET;
         p.sin_port = htons(PORT_RESEAU);
         p.sin_addr.s_addr = inet_addr(argv[1]);
-        Message h = {0, 0, 0, ACTION_HELLO, 0.0, "HELLO"};
+        Message h = {0, 0, 0, 0, ACTION_HELLO, 0.0, "HELLO"};
         serialize_binary(&h, buffer);
         sendto(sock_res, buffer, sizeof(Message), 0, (struct sockaddr*)&p, sizeof(p));
         add_peer(p);
