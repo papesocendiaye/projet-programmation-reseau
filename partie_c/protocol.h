@@ -17,8 +17,8 @@ typedef enum {
 
 typedef struct {
     int id_joueur;
-    float pos_x;
-    float pos_y;
+    int pos_x;
+    int pos_y;
     ActionType action;
     char target_id[TARGET_ID_MAX]; // On a agrandi à 32 comme prévu
 } Message;

@@ -18,8 +18,10 @@ class Message:
 
     
     def serialize(self) -> bytes:
-        # On utilise des float avec 2 ou 3 décimales pour la précision du mouvement
-        msg_str = f"{self.id_joueur}|{self.pos_x:.3f}|{self.pos_y:.3f}|{self.action.value}|{self.target_id}"
+        # On multiplie par 1000 et on force en entier (évite les bugs de virgule du C)
+        pos_x_int = int(self.pos_x * 1000)
+        pos_y_int = int(self.pos_y * 1000)
+        msg_str = f"{self.id_joueur}|{pos_x_int}|{pos_y_int}|{self.action.value}|{self.target_id}"
         return msg_str.encode('utf-8')
 
     @classmethod
@@ -30,10 +32,12 @@ class Message:
         try:
             return cls(
                 id_joueur=int(parts[0]),
-                pos_x=float(parts[1]), # <-- Changé en float
-                pos_y=float(parts[2]), # <-- Changé en float
+                # On re-divise par 1000 à la réception pour retrouver les décimales
+                pos_x=(float(parts[1]) / 1000.0), 
+                pos_y=(float(parts[2]) / 1000.0), 
                 action=ActionType(int(parts[3])),
                 target_id=parts[4],
             )
         except Exception:
             return None
+        
