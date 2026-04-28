@@ -16,6 +16,7 @@ class IPCClient:
 
     def send_action(self, msg: Message):
         try:
+            # En V2 binaire, msg.serialize() renvoie directement des octets bruts !
             self.sock.sendto(msg.serialize(), self.c_address)
         except Exception as e:
             pass
@@ -24,18 +25,14 @@ class IPCClient:
         msgs = []
         try:
             while True:
+                # Lecture binaire (plus de .decode() ni de .strip() !)
                 data, _ = self.sock.recvfrom(1024)
-                # 1. NETTOYAGE VITAL : Enlève les caractères invisibles envoyés par le C (\x00, \n, etc.)
-                raw_str = data.decode('utf-8').strip('\x00').strip() 
-                
                 try:
-                    msg_obj = Message.deserialize(raw_str)
+                    msg_obj = Message.deserialize(data)
                     if msg_obj:
                         msgs.append(msg_obj)
-                    else:
-                        print(f"[PYTHON] ⚠️ deserialize() a retourné None pour : '{raw_str}'")
                 except Exception as e:
-                    print(f"[PYTHON] ❌ Erreur fatale de lecture du message '{raw_str}' : {e}")
+                    print(f"[PYTHON] ❌ Erreur de désérialisation binaire : {e}")
 
         except BlockingIOError:
             pass 
@@ -43,12 +40,3 @@ class IPCClient:
             pass
             
         return msgs
-
-if __name__ == "__main__":
-    print("--- Démarrage du Test Client Python ---")
-    ipc = IPCClient()
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        ipc.sock.close()

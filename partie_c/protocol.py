@@ -1,43 +1,41 @@
+import struct
 from dataclasses import dataclass
 from enum import IntEnum
-import socket
 
 class ActionType(IntEnum):
     MOVE = 0
     ATTACK = 1
     SPAWN = 2
     REQ_OWNERSHIP = 3
+    ACK_OWNERSHIP = 4
+    HELLO = 5
 
 @dataclass
 class Message:
     id_joueur: int
-    pos_x: float
-    pos_y: float
+    pos_x: int
+    pos_y: int
     action: ActionType
+    timestamp: float
     target_id: str
 
-    
+    # Format : < (little-endian), iiii (4 int), d (1 double), 32s (string 32 bytes)
+    _FORMAT = "<iiiid32s"
+
     def serialize(self) -> bytes:
-        # On multiplie par 1000 et on force en entier (évite les bugs de virgule du C)
-        pos_x_int = int(self.pos_x * 1000)
-        pos_y_int = int(self.pos_y * 1000)
-        msg_str = f"{self.id_joueur}|{pos_x_int}|{pos_y_int}|{self.action.value}|{self.target_id}"
-        return msg_str.encode('utf-8')
+        target_bytes = self.target_id.encode('utf-8').ljust(32, b'\x00')
+        return struct.pack(self._FORMAT, 
+                           self.id_joueur, 
+                           self.pos_x, 
+                           self.pos_y, 
+                           int(self.action), 
+                           self.timestamp, 
+                           target_bytes)
 
     @classmethod
-    def deserialize(cls, data_str: str):
-        parts = data_str.strip().split("|")
-        if len(parts) != 5:
+    def deserialize(cls, data: bytes):
+        if len(data) != struct.calcsize(cls._FORMAT):
             return None
-        try:
-            return cls(
-                id_joueur=int(parts[0]),
-                # On re-divise par 1000 à la réception pour retrouver les décimales
-                pos_x=(float(parts[1]) / 1000.0), 
-                pos_y=(float(parts[2]) / 1000.0), 
-                action=ActionType(int(parts[3])),
-                target_id=parts[4],
-            )
-        except Exception:
-            return None
-        
+        unpacked = struct.unpack(cls._FORMAT, data)
+        target_id = unpacked[5].decode('utf-8').rstrip('\x00')
+        return cls(unpacked[0], unpacked[1], unpacked[2], ActionType(unpacked[3]), unpacked[4], target_id)
