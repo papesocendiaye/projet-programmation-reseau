@@ -240,31 +240,34 @@ class Engine:
         return None
 
     def apply_network_message(self, msg):
-        """Applique les actions distantes, les tirs, les décès ET les apparitions tardives"""
+        """Applique les actions distantes, la propriété réseau V2 et convertit les floats pour la map"""
         unit = self.find_unit_by_id(msg.target_id)
         
         # 1. CONCURRENCE SAUVAGE : On reçoit un soldat inconnu ? On le crée direct !
-        if not unit and msg.pos_x > -1000.0:
+        if not unit and msg.pos_x != -1000:
             parts = msg.target_id.split('_')
             team = parts[0] if len(parts) > 0 else 'B'
             u_type = parts[1] if len(parts) > 1 else 'unknown'
             
-            # On désactive la marge de collision de la carte juste le temps de créer l'unité réseau
+            # Forçage des float en INT pour l'affichage graphique Pygame
+            pos_x_int = int(msg.pos_x)
+            pos_y_int = int(msg.pos_y)
+            
             old_marge = self.game_map.marge
             self.game_map.marge = 0 
-            self.game_map.add_unit(msg.pos_x, msg.pos_y, u_type, team)
+            self.game_map.add_unit(pos_x_int, pos_y_int, u_type, team)
             self.game_map.marge = old_marge 
 
-            unit = self.game_map.get_unit(msg.pos_x, msg.pos_y)
+            unit = self.game_map.get_unit(pos_x_int, pos_y_int)
             
             if unit and unit not in self.units:
                 print(f"[RESEAU] ⚠️ Joueur distant détecté ! Apparition sauvage de {msg.target_id}")
                 unit.direction = (0, 0)
                 unit.unit_id = msg.target_id
                 unit.last_seen = time.time()
+                unit.current_hp = msg.hp 
                 
-                # --- NOUVEAU V2 : Propriété par défaut ---
-                # Si c'est un ennemi qui apparait, c'est l'autre joueur qui en a la propriété réseau
+                # Le créateur est le propriétaire réseau par défaut
                 unit.network_owner = msg.id_joueur 
                 
                 self.units.append(unit)
@@ -272,7 +275,7 @@ class Engine:
                 self.ia1.initialize()
                 self.ia2.initialize()
                 
-                # --- CORRECTION DU HANDSHAKE (Format V2) ---
+                # --- LE HANDSHAKE ---
                 if self.ipc:
                     for local_u in self.units:
                         if local_u.team == self.local_team and local_u.is_alive and hasattr(local_u, 'unit_id'):
@@ -287,11 +290,9 @@ class Engine:
                             )
                             self.ipc.send_action(ans_msg)
 
-        # 2. Maintenant que l'unité existe, on applique ses actions :
+        # 2. Application des actions sur l'unité :
         if unit:
-            
-            # --- NOUVEAU V2 : Synchronisation des HP ---
-            # Si on reçoit un message normal et qu'on n'est pas le proprio réseau, on met à jour la barre de vie
+            # Synchronisation continue des HP si on n'est pas le propriétaire
             if getattr(unit, 'network_owner', self.player_id) != self.player_id and msg.hp > 0:
                 unit.current_hp = msg.hp
 
@@ -302,7 +303,7 @@ class Engine:
                     unit.current_hp = 0
                     unit.state = "dead"
                 else:
-                    nouvelle_pos = (msg.pos_x, msg.pos_y)
+                    nouvelle_pos = (int(msg.pos_x), int(msg.pos_y)) # INT ici aussi !
                     if unit.position != nouvelle_pos:
                         self.game_map.maj_unit_posi(unit, nouvelle_pos)
                     unit.last_seen = time.time()
@@ -319,24 +320,18 @@ class Engine:
                             self.size = 1.0          
                             self.team = 'None'       
                             self.is_alive = True     
-                            
                         def take_damage(self, attacker):
                             pass 
                     
-                    self.game_map.fire_projectile(unit, MockTarget((msg.pos_x, msg.pos_y)))
+                    self.game_map.fire_projectile(unit, MockTarget((int(msg.pos_x), int(msg.pos_y))))
                     unit.time_until_next_attack = unit.reload_time
                     
-            # ==========================================
-            #           LE CŒUR DE LA V2 ICI
-            # ==========================================
+            # --- PROTOCOLE OWNERSHIP V2 ---
             elif msg.action == ActionType.REQ_OWNERSHIP:
-                # L'adversaire veut frapper cette unité. Sommes-nous le propriétaire réseau ?
                 if getattr(unit, 'network_owner', self.player_id) == self.player_id:
                     print(f"[V2] Cession de la propriété réseau de {unit.unit_id} au joueur {msg.id_joueur}")
-                    # On lui donne la propriété réseau
                     unit.network_owner = msg.id_joueur
                     
-                    # On lui envoie l'état exact (HP et position) pour qu'il puisse calculer l'attaque
                     if self.ipc:
                         ack_msg = Message(
                             id_joueur=self.player_id,
@@ -350,11 +345,10 @@ class Engine:
                         self.ipc.send_action(ack_msg)
                         
             elif msg.action == ActionType.ACK_OWNERSHIP:
-                # L'adversaire a accepté de nous donner la propriété !
                 print(f"[V2] Propriété réseau acquise pour {unit.unit_id} ! (HP actuels: {msg.hp})")
                 unit.network_owner = self.player_id
                 unit.current_hp = msg.hp
-                nouvelle_pos = (msg.pos_x, msg.pos_y)
+                nouvelle_pos = (int(msg.pos_x), int(msg.pos_y)) # INT ici aussi !
                 if unit.position != nouvelle_pos:
                     self.game_map.maj_unit_posi(unit, nouvelle_pos)
     def initialize_ai(self):
@@ -434,7 +428,7 @@ class Engine:
                     u.is_alive = False
                     if u in self.units:
                         self.units.remove(u)
-                    self.game_map.remove_unit(u)
+                    self.game_map.remove_unit(u.position[0], u.position[1])
             ##############################################
 
             if self.tournaments:
