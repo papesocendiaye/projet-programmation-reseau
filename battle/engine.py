@@ -714,7 +714,11 @@ class Engine:
                             self.ipc.send_action(msg)
                         unit.req_sent = True
                         unit.req_sent_at = now
-                    continue # L'unité passe son tour en attendant la réponse du réseau
+
+                    # IMPORTANT : on ne `continue` PAS — il faut continuer à émettre
+                    # le heartbeat pour que le pair ne nous timeout pas (4 s sans
+                    # nouvelles → "Disparition complète"). On saute juste l'ATTACK
+                    # via la condition state=="attacking" plus bas (qui est False ici).
                 # ============================================================
 
                 if self.ipc:
@@ -777,7 +781,12 @@ class Engine:
         if self.view_type == 2:
             if a["change_view"]: self.change_view(a["change_view"])
             if a['pause']: self.game_pause = not self.game_pause
-            if a["quit"]: self.end_battle()
+            if a["quit"]:
+                # Sortie propre : sans `is_running=False`, la boucle continue
+                # à appeler display() après pygame.quit() → pygame.error.
+                self.is_running = False
+                self.end_battle()
+                return
             if a["quicksave"]: self.game_map.save_file(self.scenario_name, self.ia1.name, self.ia2.name)
             if a["quickload"]:
                 self.stop()

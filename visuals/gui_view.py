@@ -133,7 +133,7 @@ class GUI_view:
         }
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                options_return["quit"] == True
+                options_return["quit"] = True
                 pygame.quit()
                 return options_return
 
