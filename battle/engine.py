@@ -463,7 +463,7 @@ class Engine:
             if self.tournaments:
                 self.process_turn()
                 self.process_spawns()
-                self.check_victory()
+                #self.check_victory()
                 self.current_turn += 1
                 self.update_units(1 / 60)
                 self.update_projectiles()
@@ -495,7 +495,7 @@ class Engine:
                         next_view_time = turn_start + view_frame_time
                         self.update_view()
                         
-                    self.check_victory()
+                    #self.check_victory()
                     self.current_turn += 1
                     self.update_units(1 / 60)
                     self.update_projectiles()

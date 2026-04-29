@@ -11,7 +11,6 @@ typedef int socklen_t;
 #include <arpa/inet.h>
 #include <sys/select.h>
 #endif
-#include <unistd.h>
 
 #define PORT_IA 5000      
 #define PORT_RESEAU 6000  
@@ -37,6 +36,8 @@ void add_peer(struct sockaddr_in addr) {
 }
 
 int main(int argc, char *argv[]) {
+    // ... (L'initialisation réseau Win32 si tu es sous Windows n'est pas oubliée j'espère !) ...
+    
     int sock_ia = socket(AF_INET, SOCK_DGRAM, 0);
     int sock_res = socket(AF_INET, SOCK_DGRAM, 0);
 
@@ -55,6 +56,12 @@ int main(int argc, char *argv[]) {
     bind(sock_res, (struct sockaddr*)&addr_res, sizeof(addr_res));
 
     printf("Nœud V2 (Binaire + Timestamp) actif.\n");
+
+    // --- NOUVEAUTÉ : Variables pour stocker l'adresse du client Python (port 5001/5002) ---
+    struct sockaddr_in py_client_addr = {0};
+    int py_connected = 0;
+    socklen_t py_len = sizeof(py_client_addr);
+    // --------------------------------------------------------------------------------------
 
     if (argc > 1) {
         struct sockaddr_in p = {0};
@@ -76,12 +83,16 @@ int main(int argc, char *argv[]) {
 
         select(max_fd + 1, &reads, NULL, NULL, NULL);
 
+        // 1. RECEPTION DEPUIS PYTHON
         if (FD_ISSET(sock_ia, &reads)) {
-            int len = recvfrom(sock_ia, buffer, sizeof(Message), 0, NULL, NULL);
+            // CORRECTION : On utilise py_client_addr au lieu de NULL pour capturer le port d'origine !
+            int len = recvfrom(sock_ia, buffer, sizeof(Message), 0, (struct sockaddr*)&py_client_addr, &py_len);
             if (len == sizeof(Message)) {
+                py_connected = 1; // On sait maintenant à qui répondre en local !
+                
                 Message m;
                 deserialize_binary(buffer, &m);
-                printf("[IA LOCALE] Action: %d recue pour %s\n", m.action, m.target_id);
+                // printf("[IA LOCALE] Action: %d recue pour %s\n", m.action, m.target_id);
                 for(int i=0; i<MAX_PEERS; i++) {
                     if(lobby[i].active) 
                         sendto(sock_res, buffer, sizeof(Message), 0, (struct sockaddr*)&lobby[i].addr, sizeof(lobby[i].addr));
@@ -89,6 +100,7 @@ int main(int argc, char *argv[]) {
             }
         }
 
+        // 2. RECEPTION DEPUIS LE RESEAU
         if (FD_ISSET(sock_res, &reads)) {
             int len = recvfrom(sock_res, buffer, sizeof(Message), 0, (struct sockaddr*)&sender_addr, &addr_len);
             if (len == sizeof(Message)) {
@@ -97,8 +109,12 @@ int main(int argc, char *argv[]) {
                 if (m.action == ACTION_HELLO) {
                     add_peer(sender_addr);
                 } else {
-                    printf("[RESEAU] Action: %d recue | Time: %f\n", m.action, m.timestamp);
-                    sendto(sock_ia, buffer, sizeof(Message), 0, (struct sockaddr*)&addr_ia, sizeof(addr_ia));
+                    // printf("[RESEAU] Action: %d recue | Time: %f\n", m.action, m.timestamp);
+                    
+                    // CORRECTION : On renvoie à py_client_addr (5001), et pas à addr_ia (5000)
+                    if (py_connected) {
+                        sendto(sock_ia, buffer, sizeof(Message), 0, (struct sockaddr*)&py_client_addr, py_len);
+                    }
                 }
             }
         }
