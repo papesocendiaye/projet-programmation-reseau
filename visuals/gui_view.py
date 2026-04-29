@@ -525,10 +525,13 @@ class GUI_view:
 
     def display(self, map: Map, battle_infos: dict):
         """ Return True si il faut continuer a afficher et False si il faut quitter le gui"""
-        if self.all_units is None:
-            self.all_units = []
-            for (x, y) in map.map:
-                self.all_units.append(map.get_unit(x, y))
+        # IMPORTANT : reconstruction à chaque frame depuis la map vivante.
+        # Si on ne le faisait qu'une fois (snapshot initial), les unités adverses
+        # créées en cours de partie via concurrence sauvage n'apparaitraient
+        # jamais dans le rendu principal (alors qu'elles sont sur la mini-map
+        # qui lit map.map directement).
+        self.all_units = [map.get_unit(x, y) for (x, y) in list(map.map.keys())
+                          if map.get_unit(x, y) is not None]
 
         self.screen.fill((0,0,0))
         
