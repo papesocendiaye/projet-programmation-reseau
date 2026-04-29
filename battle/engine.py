@@ -417,6 +417,11 @@ class Engine:
             if self.ipc:
                 messages = self.ipc.get_pending_messages()
                 for msg in messages:
+                    # ==========================================
+                    # PRINT DE DEBUG : Vérification des Coordonnées
+                    # ==========================================
+                    print(f"[VERIF PYGAME] Reçu {msg.action.name} pour {msg.target_id} en X:{msg.pos_x} Y:{msg.pos_y}")
+                    
                     self.apply_network_message(msg)
                     
                 # 3. Disparition absolue des joueurs déconnectés
@@ -444,7 +449,7 @@ class Engine:
                     if u.team == self.local_team and u.is_alive:
                         # On forge un message SPAWN de rappel en binaire
                         msg_sync = Message(
-                            id_joueur=1, # Mettez l'ID de votre joueur ici
+                            id_joueur=1, # Laissez 1 ou mettez self.player_id si ça existe
                             pos_x=float(u.position[0]),
                             pos_y=float(u.position[1]),
                             hp=float(u.current_hp),
@@ -469,16 +474,16 @@ class Engine:
             else:
                 if not self.game_pause:
                     if self.view_type > 1 and self.current_turn % 5 == 0:
-                        if self.real_tps == 0: tps =60 
+                        if self.real_tps == 0: tps = 60 
                         else: tps = self.real_tps
                         if self.tps <= 0: 
-                            self.tps =0
-                            perf =1
+                            self.tps = 0
+                            perf = 1
                         else: perf = tps / (self.tps) 
                         
-                        view_frame_time= max(min(( view_frame_time / perf), self.max_frame_delay), self.min_frame_delay)
-                        self.turn_time_target = max(min(( self.turn_time_target * perf), 1/(self.tps+3)), 1/(self.tps+30))
-                        view_frame_time =max( 1/tps , view_frame_time) 
+                        view_frame_time = max(min((view_frame_time / perf), self.max_frame_delay), self.min_frame_delay)
+                        self.turn_time_target = max(min((self.turn_time_target * perf), 1/(self.tps+3)), 1/(self.tps+30))
+                        view_frame_time = max(1/tps, view_frame_time) 
                         self.turn_fps = 1 / view_frame_time
                         max_turn_time = self.turn_time_target 
 
