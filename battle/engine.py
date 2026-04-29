@@ -345,12 +345,33 @@ class Engine:
                         self.ipc.send_action(ack_msg)
                         
             elif msg.action == ActionType.ACK_OWNERSHIP:
+                # 'unit' = la VICTIME dont on vient d'acquérir la propriété réseau.
                 print(f"[V2] Propriété réseau acquise pour {unit.unit_id} ! (HP actuels: {msg.hp})")
                 unit.network_owner = self.player_id
                 unit.current_hp = msg.hp
                 nouvelle_pos = (int(msg.pos_x), int(msg.pos_y)) # INT ici aussi !
                 if unit.position != nouvelle_pos:
                     self.game_map.maj_unit_posi(unit, nouvelle_pos)
+
+                if msg.hp <= 0:
+                    # Cible déjà morte côté pair : on propage le décès localement
+                    unit.is_alive = False
+                    unit.current_hp = 0
+                    unit.state = "dead"
+
+                # Sortie de "waiting_ownership" : on débloque l'attaquant local qui
+                # patientait. Sans ce reset il reste figé indéfiniment et le combat
+                # ne démarre jamais (apparait comme un crash côté joueur).
+                for attacker in self.units:
+                    if (getattr(attacker, 'state', None) == "waiting_ownership"
+                            and getattr(attacker, 'target', None) is unit):
+                        attacker.req_sent = False
+                        attacker.req_sent_at = None
+                        if msg.hp <= 0:
+                            # Cohérence PDF §2.d : pas de riposte sur un mort
+                            attacker.target = None
+                        attacker.state = "idle"
+
     def initialize_ai(self):
         if self.ia1 not in AI_REGISTRY: raise ValueError(f"IA '{self.ia1}' non reconnue.")
         if self.ia2 not in AI_REGISTRY: raise ValueError(f"IA '{self.ia2}' non reconnue.") 
@@ -581,23 +602,44 @@ class Engine:
 
                 # ============================================================
                 # --- V2 : GESTION DE L'ATTENTE DE PROPRIÉTÉ RÉSEAU ---
+                # Verrou "sémaphore binaire" : timestamp `req_sent_at` qui sert
+                # à la fois de retry (perte UDP) et d'abandon (pair planté).
                 # ============================================================
                 if unit.state == "waiting_ownership" and unit.target:
-                    # Pour ne pas spammer le réseau à chaque frame :
-                    if not getattr(unit, 'req_sent', False):
+                    now = time.time()
+                    last_req = getattr(unit, 'req_sent_at', None)
+
+                    if last_req is None:
                         print(f"[V2] {unit.unit_id} demande l'autorisation d'attaquer {unit.target.unit_id}...")
+                        send_req = True
+                    elif now - last_req > 2.0:
+                        # Pair injoignable depuis 2 s : on libère l'unité
+                        print(f"[V2] Timeout REQ pour {unit.unit_id} (cible {unit.target.unit_id}), abandon.")
+                        unit.state = "idle"
+                        unit.target = None
+                        unit.req_sent = False
+                        unit.req_sent_at = None
+                        continue
+                    elif now - last_req > 0.5:
+                        # Possible perte UDP : on retransmet
+                        send_req = True
+                    else:
+                        send_req = False
+
+                    if send_req:
                         if self.ipc:
                             msg = Message(
-                                id_joueur=self.player_id, 
-                                pos_x=0.0, 
-                                pos_y=0.0, 
+                                id_joueur=self.player_id,
+                                pos_x=0.0,
+                                pos_y=0.0,
                                 hp=0.0,
                                 action=ActionType.REQ_OWNERSHIP,
-                                timestamp=time.time(),
+                                timestamp=now,
                                 target_id=str(unit.target.unit_id)
                             )
                             self.ipc.send_action(msg)
                         unit.req_sent = True
+                        unit.req_sent_at = now
                     continue # L'unité passe son tour en attendant la réponse du réseau
                 # ============================================================
 
