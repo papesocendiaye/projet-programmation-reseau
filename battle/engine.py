@@ -434,7 +434,7 @@ class Engine:
                     u.is_alive = False
                     if u in self.units:
                         self.units.remove(u)
-                    self.game_map.remove_unit_obj(u) 
+                    self.game_map.remove_unit(u)
             ##############################################
 
             if self.tournaments:
