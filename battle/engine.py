@@ -250,11 +250,15 @@ class Engine:
             
             old_marge = getattr(self.game_map, 'marge', 0)
             self.game_map.marge = 0 
-            self.game_map.add_unit(msg.pos_x, msg.pos_y, u_type, team)
+            
+            # --- CORRECTION INVISIBILITÉ : On force en entier pour rentrer dans la grille visuelle Pygame ---
+            spawn_x = int(msg.pos_x)
+            spawn_y = int(msg.pos_y)
+            self.game_map.add_unit(spawn_x, spawn_y, u_type, team)
             self.game_map.marge = old_marge 
 
             # CORRECTIF 1 : Chercher la nouvelle unité intelligemment même si les floats sont tronqués
-            unit = self.game_map.get_unit(msg.pos_x, msg.pos_y)
+            unit = self.game_map.get_unit(spawn_x, spawn_y)
             if not unit:
                 for pos, u in self.game_map.map.items():
                     # On cherche une unité de cette équipe qui n'a pas encore de nom (donc celle qu'on vient de créer)
@@ -301,16 +305,19 @@ class Engine:
                     unit.state = "dead"
                     if unit in self.units:
                         self.units.remove(unit)
-                    if hasattr(self.game_map, 'remove_unit_obj'):
-                        self.game_map.remove_unit_obj(unit)
                         
-                    # --- CORRECTION ICI : On utilise remove_unit ---
+                    # --- CORRECTION DU CRASH (Mort confirmée) : On donne X et Y à remove_unit ---
                     if hasattr(self.game_map, 'remove_unit'):
-                        self.game_map.remove_unit(unit)
+                        self.game_map.remove_unit(unit.position[0], unit.position[1])
                 else:
                     nouvelle_pos = (msg.pos_x, msg.pos_y)
                     if unit.position != nouvelle_pos:
-                        self.game_map.maj_unit_posi(unit, nouvelle_pos)
+                         # On met à jour la position réelle de l'unité
+                        try:
+                            self.game_map.maj_unit_posi(unit, nouvelle_pos)
+                        except Exception:
+                            pass
+                        unit.position = nouvelle_pos # On force la position pour l'affichage fluide
                     unit.last_seen = time.time()
                     
             elif msg.action == ActionType.ATTACK:
@@ -447,7 +454,7 @@ class Engine:
                     self.game_map.remove_unit_obj(u) 
                     # --- CORRECTION ICI : On utilise remove_unit ---
                     if hasattr(self.game_map, 'remove_unit'):
-                        self.game_map.remove_unit(u)    
+                       self.game_map.remove_unit(u.position[0], u.position[1])    
             ##############################################
 
             # =========================================================
