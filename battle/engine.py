@@ -436,6 +436,25 @@ class Engine:
                     self.game_map.remove_unit_obj(u) 
             ##############################################
 
+            # =========================================================
+            # --- V2 : SYNCHRONISATION CONTINUE (HEARTBEAT) ---
+            # =========================================================
+            if self.ipc and self.current_turn % 60 == 0:
+                for u in self.units:
+                    if u.team == self.local_team and u.is_alive:
+                        # On forge un message SPAWN de rappel en binaire
+                        msg_sync = Message(
+                            id_joueur=1, # Mettez l'ID de votre joueur ici
+                            pos_x=float(u.position[0]),
+                            pos_y=float(u.position[1]),
+                            hp=float(u.current_hp),
+                            action=ActionType.SPAWN,
+                            timestamp=time.time(),
+                            target_id=u.unit_id
+                        )
+                        self.ipc.send_action(msg_sync)
+            # =========================================================
+
             if self.tournaments:
                 self.process_turn()
                 self.process_spawns()
