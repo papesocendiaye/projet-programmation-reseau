@@ -47,8 +47,8 @@ class Terminal_view:
         self.offset[0] = min(max(self.offset[0] + dx, 0), self.size_map[0] - self.max_size[0])
         self.offset[1] = min(max(self.offset[1] + dy, 0), self.size_map[1] - self.max_size[1])
 
-    def display(self, map : Map, battle_infos : dict):
-        """Affiche la map"""
+    def display(self, map : Map, battle_infos : dict, units=None):
+        """Affiche la map (units optionnel — non utilisé en vue terminale)"""
 
         # On recupere la grille avec une unite max par case
         grid = self.map2grid(map)
