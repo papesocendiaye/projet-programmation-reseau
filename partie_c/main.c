@@ -2,8 +2,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include "protocol.h"
+#ifdef _WIN32
+#include <winsock2.h>
+typedef int socklen_t;
+#pragma comment(lib, "ws2_32.lib")
+#else
+#include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/select.h>
+#endif
 #include <unistd.h>
 
 #define PORT_IA 5000      
