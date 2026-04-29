@@ -350,26 +350,16 @@ class Map:
     ########################################################
     #  Partie Projectiles et fonction attack(unit,target)  #
     ########################################################
+    def cell_owner(self, x, y):
+        # Propriétaire réseau d'une case = network_owner de l'unité dessus.
+        # Case vide => None (libre). Source de vérité unique pour Engine.try_action.
+        unit = self.map.get((x, y))
+        return getattr(unit, 'network_owner', None) if unit else None
 
     def attack2(self, unit, target):
         if not unit.can_attack(target):
             return None  # Ne peut pas attaquer
             
-        # ==========================================
-        #       V2 : GESTION PROPRIÉTÉ RÉSEAU
-        # ==========================================
-        unit_owner = getattr(unit, 'network_owner', None)
-        target_owner = getattr(target, 'network_owner', None)
-        
-        # Si la cible appartient à l'adversaire, on bloque l'attaque !
-        if unit_owner is not None and target_owner is not None:
-            if unit_owner != target_owner:
-                # On met l'unité en pause, l'engine.py va prendre le relais pour envoyer la demande
-                unit.state = "waiting_ownership"
-                unit.target = target
-                return False 
-        # ==========================================
-
         if unit.time_before_next_attack > 0:
             unit.state = "attacking"
             angle = atan2(target.position[1] - unit.position[1], target.position[0] - unit.position[0]) + 3.15
