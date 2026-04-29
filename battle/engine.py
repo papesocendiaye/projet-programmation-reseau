@@ -113,7 +113,7 @@ class Engine:
         self.time_since_last_spawn = 0.0
         self.unit_id_counter = 0
 
-        ### Initialisation IPC & Sécurités ###
+       ### Initialisation IPC & Sécurités ###
         self.local_team = local_team # 'R' ou 'B'
         self.player_id = 1 if local_team == 'R' else 2
         self.dead_units_sync = set() # Pour ne pas spammer la mort d'une unité
@@ -121,9 +121,10 @@ class Engine:
         
         if IPCClient:
             try:
-                port_ecoute = 5001 if local_team == 'R' else 5002
+                # --- CORRECTION DU BUG DE L'AVEUGLE ---
+                # Les deux PC écoutent sur le port 5001 (le port visé par le routeur C)
+                port_ecoute = 5001 
                 
-                # --- RETOUR AU VRAI RÉSEAU (2 PC DIFFÉRENTS) ---
                 # Les deux Python envoient à leur programme C respectif (qui écoute sur 5000)
                 port_cible = 5000 
                 
