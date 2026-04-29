@@ -107,12 +107,16 @@ int main(int argc, char *argv[]) {
             if (len == sizeof(Message)) {
                 Message m;
                 deserialize_binary(buffer, &m);
-                if (m.action == ACTION_HELLO) {
-                    add_peer(sender_addr);
-                } else {
-                    // ---> LE CORRECTIF EST ICI : on renvoie au Python sur son port 5001 <---
-                    struct sockaddr_in addr_python = addr_ia; 
-                    addr_python.sin_port = htons(5001); 
+                // Découverte de pair robuste : tout message entrant nous apprend
+                // l'existence de l'expéditeur (add_peer est idempotent ligne 29).
+                // Évite l'asymétrie permanente quand un HELLO initial a été perdu
+                // ou qu'un seul côté a été lancé avec <peer_ip>.
+                add_peer(sender_addr);
+
+                if (m.action != ACTION_HELLO) {
+                    // On renvoie au Python local sur le port 5001
+                    struct sockaddr_in addr_python = addr_ia;
+                    addr_python.sin_port = htons(5001);
                     sendto(sock_ia, buffer, sizeof(Message), 0, (struct sockaddr*)&addr_python, sizeof(addr_python));
                 }
             }
