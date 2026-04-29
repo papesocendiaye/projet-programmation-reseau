@@ -302,6 +302,14 @@ class Engine:
                     unit.is_alive = False
                     unit.current_hp = 0
                     unit.state = "dead"
+                    
+                    # --- CORRECTIF : Retrait IMMÉDIAT de l'affichage (Map) ---
+                    # On la retire de la grille graphique pour qu'elle ne soit plus dessinée
+                    self.game_map.remove_unit(unit.position[0], unit.position[1])
+                    
+                    # On la retire aussi de la liste globale du moteur
+                    if unit in self.units:
+                        self.units.remove(unit)
                 else:
                     nouvelle_pos = (int(msg.pos_x), int(msg.pos_y)) # INT ici aussi !
                     if unit.position != nouvelle_pos:
