@@ -759,7 +759,8 @@ class Engine:
         units_team1 = len([u for u in self.units if u.team == self.local_team and u.is_alive])
         units_team2 = len([u for u in self.units if u.team != self.local_team and u.is_alive])
 
-        if self.current_turn > 60: # Laisse 1 sec aux joueurs pour apparaître
+        # --- CORRECTIF : On laisse 300 tours (5 secondes) au réseau pour se synchroniser ---
+        if self.current_turn > 300: 
             if units_team1 == 0 and units_team2 > 0:
                 nouvel_etat = "DEFAITE"
             elif units_team2 == 0 and units_team1 > 0:
@@ -774,7 +775,6 @@ class Engine:
                 print(f"\n[JEU] ---> ETAT DU MATCH : {nouvel_etat} <---")
             self.winner_state = nouvel_etat
     ##############################################################################
-
     def end_battle(self):
         if self.view == 1 and not self.tournaments: self.update_view()
         if not self.tournaments and "lanchester" in self.scenario_name.lower():
