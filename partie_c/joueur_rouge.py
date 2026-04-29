@@ -18,8 +18,8 @@ from battle.engine import Engine
 if __name__ == "__main__":
     print("--- Démarrage Joueur ROUGE ---")
     moteur = Engine(
-        scenario="stest3", # <-- METTEZ VOTRE SCENARIO ICI
-        ia1="major_daft",       # <-- METTEZ VOTRE IA ROUGE ICI
+        scenario="156u_KCPL_210", # <-- METTEZ VOTRE SCENARIO ICI
+        ia1="Strategus20",       # <-- METTEZ VOTRE IA ROUGE ICI
         ia2="Strategus20",       # <-- METTEZ VOTRE IA BLEUE ICI
         view_type=2, 
         local_team='R'         # <-- Ce PC calcule l'équipe Rouge
