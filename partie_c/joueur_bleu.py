@@ -18,9 +18,9 @@ from battle.engine import Engine
 if __name__ == "__main__":
     print("--- Démarrage Joueur ROUGE ---")
     moteur = Engine(
-        scenario="stest1", # <-- METTEZ VOTRE SCENARIO ICI
+        scenario="stest3", # <-- METTEZ VOTRE SCENARIO ICI
         ia1="major_daft",       # <-- METTEZ VOTRE IA ROUGE ICI
-        ia2="major_daft",       # <-- METTEZ VOTRE IA BLEUE ICI
+        ia2="Strategus20",       # <-- METTEZ VOTRE IA BLEUE ICI
         view_type=2, 
         local_team='B'         # <-- Ce PC calcule l'équipe Bleue
     )
