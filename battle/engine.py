@@ -202,8 +202,12 @@ class Engine:
                 continue
             # ------------------------------------------------------------------
 
-            self.game_map.add_unit(x, y, unit_type, team)
-            new_unit = self.game_map.get_unit(x, y)
+            # --- LA SOLUTION PROPRE : On force des nombres entiers dès l'apparition ---
+            spawn_x = int(x)
+            spawn_y = int(y)
+            self.game_map.add_unit(spawn_x, spawn_y, unit_type, team)
+            new_unit = self.game_map.get_unit(spawn_x, spawn_y)
+            # -------------------------------------------------------------------------
             
             if new_unit and new_unit not in self.units:
                 new_unit.direction = (0, 0)
@@ -218,22 +222,17 @@ class Engine:
                 self.ia1.initialize()
                 self.ia2.initialize()
                 
-                # ===================================================================
-                # --- CORRECTION 1 : Forcer Pygame à dessiner TES nouvelles troupes ---
-                # ===================================================================
-                if self.view_type > 0:
-                    self.initialize_view()
-                # ===================================================================
+                # SUPPRESSION DU BLOC initialize_view() QUI FAISAIT CLIGNOTER L'ÉCRAN
                 
                 ### ANNONCE SPAWN (Mise à jour Format V2) ###
                 if self.ipc and team == self.local_team:
                     msg = Message(
                         id_joueur=self.player_id,
-                        pos_x=x,
-                        pos_y=y,
-                        hp=new_unit.current_hp,       # <-- Ajout des HP
+                        pos_x=float(spawn_x),
+                        pos_y=float(spawn_y),
+                        hp=new_unit.current_hp,
                         action=ActionType.SPAWN,
-                        timestamp=time.time(),        # <-- Ajout du timestamp
+                        timestamp=time.time(),
                         target_id=new_unit.unit_id
                     )
                     self.ipc.send_action(msg)
@@ -258,8 +257,10 @@ class Engine:
             old_marge = getattr(self.game_map, 'marge', 0)
             self.game_map.marge = 0 
             
-            # On laisse les coordonnées exactes pour ne pas casser l'IA !
-            self.game_map.add_unit(msg.pos_x, msg.pos_y, u_type, team)
+            # --- LA SOLUTION PROPRE : Nombres entiers obligatoires pour que Pygame l'affiche sans clignoter ---
+            spawn_x = int(msg.pos_x)
+            spawn_y = int(msg.pos_y)
+            self.game_map.add_unit(spawn_x, spawn_y, u_type, team)
             self.game_map.marge = old_marge 
 
             # CORRECTIF MAGIQUE : On fouille le dico de la carte pour trouver le nouveau soldat sans utiliser les coordonnées
@@ -275,16 +276,11 @@ class Engine:
                 unit.last_seen = time.time()
                 unit.network_owner = msg.id_joueur 
                 
-                self.units.append(unit) # <-- C'est CA qui rend l'unité visible pour le moteur de jeu
+                self.units.append(unit) # <-- Pygame la dessinera naturellement à la frame suivante grâce au int()
                 self.ia1.initialize()
                 self.ia2.initialize()
                 
-                # ===================================================================
-                # --- CORRECTION 2 : Forcer Pygame à dessiner LES troupes ENNEMIES ---
-                # ===================================================================
-                if getattr(self, 'view_type', 0) > 0:
-                    self.initialize_view()
-                # ===================================================================
+                # ---> SUPPRESSION DU BLOC initialize_view() QUI FAISAIT CLIGNOTER L'ÉCRAN <---
                 
                 if self.ipc:
                     for local_u in self.units:
