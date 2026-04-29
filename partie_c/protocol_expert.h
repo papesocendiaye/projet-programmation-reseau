@@ -12,10 +12,10 @@ typedef enum {
 
 #pragma pack(push, 1) // on va force la taille à 56 octets sans padding
 typedef struct {
-    int32_t player_id;      
+    int32_t id_joueur;      
     int32_t x;              
     int32_t y;              
-    int32_t action_type;    
+    int32_t action;    
     double  timestamp;     
     char    unit_id[32];    
     uint16_t checksum;    
