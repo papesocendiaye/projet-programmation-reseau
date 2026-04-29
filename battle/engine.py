@@ -251,29 +251,24 @@ class Engine:
             old_marge = getattr(self.game_map, 'marge', 0)
             self.game_map.marge = 0 
             
-            # --- CORRECTION INVISIBILITÉ : On force en entier pour rentrer dans la grille visuelle Pygame ---
-            spawn_x = int(msg.pos_x)
-            spawn_y = int(msg.pos_y)
-            self.game_map.add_unit(spawn_x, spawn_y, u_type, team)
+            # On laisse les coordonnées exactes pour ne pas casser l'IA !
+            self.game_map.add_unit(msg.pos_x, msg.pos_y, u_type, team)
             self.game_map.marge = old_marge 
 
-            # CORRECTIF 1 : Chercher la nouvelle unité intelligemment même si les floats sont tronqués
-            unit = self.game_map.get_unit(spawn_x, spawn_y)
-            if not unit:
-                for pos, u in self.game_map.map.items():
-                    # On cherche une unité de cette équipe qui n'a pas encore de nom (donc celle qu'on vient de créer)
-                    if u and u.team == team and not hasattr(u, 'unit_id'):
-                        unit = u
-                        break
+            # CORRECTIF MAGIQUE : On fouille le dico de la carte pour trouver le nouveau soldat sans utiliser les coordonnées
+            for pos, u in self.game_map.map.items():
+                if u and getattr(u, 'team', '') == team and not hasattr(u, 'unit_id'):
+                    unit = u
+                    break
             
             if unit and unit not in self.units:
-                print(f"[RESEAU] ⚠️ Joueur distant détecté ! Apparition de {msg.target_id}")
+                print(f"[RESEAU] ⚠️ Apparition validée pour {msg.target_id}")
                 unit.direction = (0, 0)
                 unit.unit_id = msg.target_id
                 unit.last_seen = time.time()
                 unit.network_owner = msg.id_joueur 
                 
-                self.units.append(unit)
+                self.units.append(unit) # <-- C'est CA qui rend l'unité visible dans Pygame
                 self.ia1.initialize()
                 self.ia2.initialize()
                 
@@ -298,7 +293,6 @@ class Engine:
 
             if msg.action == ActionType.MOVE or msg.action == ActionType.SPAWN:
                 if msg.pos_x <= -1000.0 and msg.pos_y <= -1000.0:
-                    # CORRECTIF 2 : Supprimer physiquement le "Zombie" de la mémoire
                     print(f"[RESEAU] Mort confirmée de l'unité adverse : {msg.target_id}")
                     unit.is_alive = False
                     unit.current_hp = 0
@@ -306,25 +300,25 @@ class Engine:
                     if unit in self.units:
                         self.units.remove(unit)
                         
-                    # --- CORRECTION DU CRASH (Mort confirmée) : On donne X et Y à remove_unit ---
-                    if hasattr(self.game_map, 'remove_unit'):
-                        self.game_map.remove_unit(unit.position[0], unit.position[1])
+                    # Suppression ultra-sécurisée qui ne crashera pas
+                    try:
+                        if hasattr(self.game_map, 'remove_unit'):
+                            self.game_map.remove_unit(unit.position[0], unit.position[1])
+                    except Exception:
+                        # Nettoyage manuel si les décimales bloquent
+                        cles_a_supprimer = [k for k, v in self.game_map.map.items() if v == unit]
+                        for k in cles_a_supprimer:
+                            del self.game_map.map[k]
                 else:
                     nouvelle_pos = (msg.pos_x, msg.pos_y)
                     if unit.position != nouvelle_pos:
-                         # On met à jour la position réelle de l'unité
-                        try:
-                            self.game_map.maj_unit_posi(unit, nouvelle_pos)
-                        except Exception:
-                            pass
-                        unit.position = nouvelle_pos # On force la position pour l'affichage fluide
+                        self.game_map.maj_unit_posi(unit, nouvelle_pos)
                     unit.last_seen = time.time()
                     
             elif msg.action == ActionType.ATTACK:
                 unit.last_seen = time.time()
                 unit.state = "attacking"
                 if unit.type in ['C', 'S'] and unit.time_until_next_attack <= 0:
-                    # CORRECTIF 3 : On donne un ID et des HP au Mock pour éviter que le projectile crash
                     class MockTarget:
                         def __init__(self, pos):
                             self.position = pos
@@ -344,7 +338,7 @@ class Engine:
                     
             elif msg.action == ActionType.REQ_OWNERSHIP:
                 if getattr(unit, 'network_owner', self.player_id) == self.player_id:
-                    print(f"[V2] Cession de la propriété réseau de {unit.unit_id} au joueur {msg.id_joueur}")
+                    print(f"[V2] Cession propriété de {unit.unit_id} au joueur {msg.id_joueur}")
                     unit.network_owner = msg.id_joueur
                     if self.ipc:
                         ack_msg = Message(
@@ -359,10 +353,9 @@ class Engine:
                         self.ipc.send_action(ack_msg)
                         
             elif msg.action == ActionType.ACK_OWNERSHIP:
-                print(f"[V2] Propriété réseau acquise pour {unit.unit_id} ! (HP actuels: {msg.hp})")
+                print(f"[V2] Propriété acquise pour {unit.unit_id} ! (HP: {msg.hp})")
                 unit.network_owner = self.player_id
                 unit.current_hp = msg.hp
-                # CORRECTIF 4 : On débloque l'unité pour qu'elle puisse enfin frapper !
                 unit.req_sent = False
                 unit.state = "ready"
                 
@@ -438,6 +431,7 @@ class Engine:
                     self.apply_network_message(msg)
                     
                 # 3. Disparition absolue des joueurs déconnectés
+                # 3. Disparition absolue des joueurs déconnectés
                 temps_actuel = time.time()
                 unites_a_supprimer = []
                 
@@ -451,10 +445,15 @@ class Engine:
                     u.is_alive = False
                     if u in self.units:
                         self.units.remove(u)
-                    self.game_map.remove_unit_obj(u) 
-                    # --- CORRECTION ICI : On utilise remove_unit ---
-                    if hasattr(self.game_map, 'remove_unit'):
-                       self.game_map.remove_unit(u.position[0], u.position[1])    
+                        
+                    # Suppression ultra-sécurisée
+                    try:
+                        if hasattr(self.game_map, 'remove_unit'):
+                            self.game_map.remove_unit(u.position[0], u.position[1])
+                    except Exception:
+                        cles_a_supprimer = [k for k, v in self.game_map.map.items() if v == u]
+                        for k in cles_a_supprimer:
+                            del self.game_map.map[k]  
             ##############################################
 
             # =========================================================
