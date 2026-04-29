@@ -308,14 +308,34 @@ class Engine:
                     unit.is_alive = False
                     unit.current_hp = 0
                     unit.state = "dead"
-                    
+
                     # --- CORRECTIF : Retrait IMMÉDIAT de l'affichage (Map) ---
                     # On la retire de la grille graphique pour qu'elle ne soit plus dessinée
                     self.game_map.remove_unit(unit.position[0], unit.position[1])
-                    
+
                     # On la retire aussi de la liste globale du moteur
                     if unit in self.units:
                         self.units.remove(unit)
+                elif msg.action == ActionType.SPAWN and not unit.is_alive:
+                    # Le pair a redémarré et réutilise le même unit_id alors qu'on
+                    # avait gardé une trace morte de l'unité (elle n'a pas encore
+                    # été nettoyée). On la ressuscite plutôt que d'ignorer le SPAWN.
+                    print(f"[RESEAU] Re-spawn de {msg.target_id} (restart du pair)")
+                    nouvelle_pos = (int(msg.pos_x), int(msg.pos_y))
+                    unit.is_alive = True
+                    unit.current_hp = msg.hp if msg.hp > 0 else getattr(unit, 'max_hp', 100)
+                    unit.state = "idle"
+                    unit.network_owner = msg.id_joueur
+                    unit.last_seen = time.time()
+                    if hasattr(unit, 'died_at'):
+                        unit.died_at = None
+                    self.dead_units_sync.discard(unit.unit_id)
+                    if unit.position != nouvelle_pos:
+                        self.game_map.maj_unit_posi(unit, nouvelle_pos)
+                    # S'assurer que l'unité est bien re-référencée dans la grille et la liste
+                    self.game_map.map[nouvelle_pos] = unit
+                    if unit not in self.units:
+                        self.units.append(unit)
                 else:
                     nouvelle_pos = (int(msg.pos_x), int(msg.pos_y)) # INT ici aussi !
                     if unit.position != nouvelle_pos:
