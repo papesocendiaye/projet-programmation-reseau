@@ -218,6 +218,13 @@ class Engine:
                 self.ia1.initialize()
                 self.ia2.initialize()
                 
+                # ===================================================================
+                # --- CORRECTION 1 : Forcer Pygame à dessiner TES nouvelles troupes ---
+                # ===================================================================
+                if self.view_type > 0:
+                    self.initialize_view()
+                # ===================================================================
+                
                 ### ANNONCE SPAWN (Mise à jour Format V2) ###
                 if self.ipc and team == self.local_team:
                     msg = Message(
@@ -268,9 +275,16 @@ class Engine:
                 unit.last_seen = time.time()
                 unit.network_owner = msg.id_joueur 
                 
-                self.units.append(unit) # <-- C'est CA qui rend l'unité visible dans Pygame
+                self.units.append(unit) # <-- C'est CA qui rend l'unité visible pour le moteur de jeu
                 self.ia1.initialize()
                 self.ia2.initialize()
+                
+                # ===================================================================
+                # --- CORRECTION 2 : Forcer Pygame à dessiner LES troupes ENNEMIES ---
+                # ===================================================================
+                if getattr(self, 'view_type', 0) > 0:
+                    self.initialize_view()
+                # ===================================================================
                 
                 if self.ipc:
                     for local_u in self.units:
