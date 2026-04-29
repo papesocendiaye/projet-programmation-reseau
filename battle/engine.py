@@ -337,7 +337,10 @@ class Engine:
                     if unit not in self.units:
                         self.units.append(unit)
                 else:
-                    nouvelle_pos = (int(msg.pos_x), int(msg.pos_y)) # INT ici aussi !
+                    # Position flottante (comme les unités locales) pour un rendu
+                    # fluide. La précision sub-pixel évite les sauts de 20 px par
+                    # tile lors de l'affichage isométrique.
+                    nouvelle_pos = (msg.pos_x, msg.pos_y)
                     if unit.position != nouvelle_pos:
                         self.game_map.maj_unit_posi(unit, nouvelle_pos)
                     unit.last_seen = time.time()
@@ -357,17 +360,15 @@ class Engine:
                         def take_damage(self, attacker):
                             pass 
                     
-                    # 1. On DÉFINIT bien tx et ty ici :
-                    tx = int(msg.pos_x)
-                    ty = int(msg.pos_y)
-                    ux = int(unit.position[0])
-                    uy = int(unit.position[1])
-                    
-                    # 2. On applique la sécurité anti-crash :
-                    if tx == ux and ty == uy:
-                        tx += 1 
-                        
-                    # 3. On tire en utilisant tx et ty (qui existent bien maintenant !)
+                    # Positions flottantes pour la cible du tir visuel
+                    tx, ty = msg.pos_x, msg.pos_y
+                    ux, uy = unit.position[0], unit.position[1]
+
+                    # Sécurité anti-divbyzero dans Projectile.arrow / lance
+                    # (distance == 0 si shooter et target au même point)
+                    if abs(tx - ux) < 1e-6 and abs(ty - uy) < 1e-6:
+                        tx += 1.0
+
                     self.game_map.fire_projectile(unit, MockTarget((tx, ty)))
                     unit.time_until_next_attack = unit.reload_time
             # --- PROTOCOLE OWNERSHIP V2 ---
@@ -686,16 +687,18 @@ class Engine:
                     if last_req is None:
                         print(f"[V2] {unit.unit_id} demande l'autorisation d'attaquer {unit.target.unit_id}...")
                         send_req = True
-                    elif now - last_req > 2.0:
-                        # Pair injoignable depuis 2 s : on libère l'unité
+                    elif now - last_req > 1.2:
+                        # Pair injoignable / cession refusée : on libère l'unité.
+                        # 1.2 s = compromis entre robustesse aux pertes UDP Wi-Fi
+                        # et fluidité (l'unité ne reste pas figée trop longtemps).
                         print(f"[V2] Timeout REQ pour {unit.unit_id} (cible {unit.target.unit_id}), abandon.")
                         unit.state = "idle"
                         unit.target = None
                         unit.req_sent = False
                         unit.req_sent_at = None
                         continue
-                    elif now - last_req > 0.5:
-                        # Possible perte UDP : on retransmet
+                    elif now - last_req > 0.3:
+                        # Retransmission rapide en cas de perte UDP
                         send_req = True
                     else:
                         send_req = False
@@ -736,7 +739,9 @@ class Engine:
                         self.ipc.send_action(msg)
                         
                     # --- CORRECTIF 3 : LE BATTEMENT DE COEUR (HEARTBEAT) ---
-                    elif unit.position != old_pos or self.current_turn % 30 == 0:
+                    # 15 turns ≈ 4 Hz à 60 TPS : plus fluide que 30 turns sans
+                    # exploser la bande passante (chaque message ≈ 60 octets).
+                    elif unit.position != old_pos or self.current_turn % 15 == 0:
                         # --- MISE A JOUR FORMAT V2 ---
                         msg = Message(
                             id_joueur=self.player_id, 
