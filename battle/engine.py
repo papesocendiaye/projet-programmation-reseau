@@ -128,9 +128,9 @@ class Engine:
         self.unit_id_counter = 0
         self.spawn_queue = []
         self.dead_units_sync = set()
-        self.history = {'turns': [], 'red_units': [], 'blue_units': []}
-        self.initial_units_count = {'R': 0, 'B': 0}
-        self.ia_thinking_time = {'R': 0.0, 'B': 0.0}
+        self.history = {'turns': [], 'red_units': [], 'blue_units': [], 'green_units': []}
+        self.initial_units_count = {'R': 0, 'B': 0, 'V': 0}
+        self.ia_thinking_time = {'R': 0.0, 'B': 0.0, 'V': 0.0}
 
     def _init_timing(self):
         self.max_fps = 60
@@ -211,7 +211,7 @@ class Engine:
     def build_spawn_queue(self):
         from battle.scenario import Scenario
         _, scenario = Scenario().get_list_by_name(self.scenario_name)
-        red, blue = [], []
+        red, blue, green = [], [], []
         if "lanchester" in self.scenario_name:
             for x, y, t in scenario:
                 if x < self.game_map.p // 2:
@@ -222,10 +222,16 @@ class Engine:
             for x, y, t in scenario:
                 red.append((x, y, t, 'R'))
                 blue.append((self.game_map.p - x, y, t, 'B'))
+                if 'V' in self.ia_names:
+                    green.append((x + self.game_map.p // 3, self.game_map.q - y, t, 'V'))
         self.spawn_queue = []
-        for i in range(max(len(red), len(blue))):
+        max_len = max(len(red), len(blue))
+        if 'V' in self.ia_names:
+            max_len = max(max_len, len(green))
+        for i in range(max_len):
             if i < len(red):  self.spawn_queue.append(red[i])
             if i < len(blue): self.spawn_queue.append(blue[i])
+            if 'V' in self.ia_names and i < len(green): self.spawn_queue.append(green[i])
 
     def initialize_units(self):
         for (x, y) in self.game_map.map:
@@ -273,8 +279,10 @@ class Engine:
             'scenario': str(self.scenario_name),
             'ia1': str(ia1_name),
             'ia2': str(ia2_name),
+            'ia3': str(self.ias['V'].name) if 'V' in self.ias else "",
             'units_ia1': len([u for u in self.units if u.team == 'R' and u.is_alive]),
             'units_ia2': len([u for u in self.units if u.team == 'B' and u.is_alive]),
+            'units_ia3': len([u for u in self.units if u.team == 'V' and u.is_alive]),
             'real_tps': self.real_tps,
             'time_from_start': time.time() - self.star_execution_time,
             'winner_ia': "draw",
@@ -784,9 +792,11 @@ class Engine:
             'turn': self.current_turn,
             'ia1': self.ias['R'].name if 'R' in self.ias else "",
             'ia2': self.ias['B'].name if 'B' in self.ias else "",
+            'ia3': self.ias['V'].name if 'V' in self.ias else "",
             'game_pause': self.game_pause,
             'units_ia1': len([u for u in self.units if u.team == 'R' and u.is_alive]),
             'units_ia2': len([u for u in self.units if u.team == 'B' and u.is_alive]),
+            'units_ia3': len([u for u in self.units if u.team == 'V' and u.is_alive]),
             'target_tps': self.tps,
             'real_tps': mean(self.tab_tps_affichage) if len(self.tab_tps_affichage) > 0 else 0,
             'turn_fps': round(self.turn_fps),
@@ -846,7 +856,10 @@ class Engine:
         info = self.get_game_info()
         filename = f"game_report_{info['turn']}.html"
         teams_data = {}
-        for code, name in {'R': 'Rouge', 'B': 'Bleue'}.items():
+        teams_dict = {'R': 'Rouge', 'B': 'Bleue'}
+        if 'V' in self.ias:
+            teams_dict['V'] = 'Verte'
+        for code, name in teams_dict.items():
             team_units = [u for u in self.units if u.team == code]
             alive = [u for u in team_units if u.is_alive]
             total_hp = sum(u.current_hp for u in alive)

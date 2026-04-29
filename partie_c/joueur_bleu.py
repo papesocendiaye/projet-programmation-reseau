@@ -16,7 +16,7 @@ from battle.engine import Engine
 # Remplacez "nom_du_scenario", "nom_ia_1" et "nom_ia_2" par les VRAIS noms 
 # qui sont dans votre AI_REGISTRY et vos fichiers de scénarios.
 if __name__ == "__main__":
-    print("--- Démarrage Joueur ROUGE ---")
+    print("--- Démarrage Joueur BLEU ---")
     moteur = Engine(
         scenario="stest1", # <-- METTEZ VOTRE SCENARIO ICI
         ia1="major_daft",       # <-- METTEZ VOTRE IA ROUGE ICI
