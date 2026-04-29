@@ -241,8 +241,14 @@ class Engine:
 
     def apply_network_message(self, msg):
         """Applique les actions distantes, la propriété réseau V2 et convertit les floats pour la map"""
+        # HELLO périodique : sert uniquement à la découverte de pair côté C
+        # (lobby symétrique), aucun effet sur la scène — ne PAS tomber dans
+        # la branche "concurrence sauvage" qui créerait une unité fantôme.
+        if msg.action == ActionType.HELLO:
+            return
+
         unit = self.find_unit_by_id(msg.target_id)
-        
+
         # 1. CONCURRENCE SAUVAGE : On reçoit un soldat inconnu ? On le crée direct !
         if not unit and msg.pos_x != -1000:
             parts = msg.target_id.split('_')
@@ -302,6 +308,21 @@ class Engine:
                     unit.is_alive = False
                     unit.current_hp = 0
                     unit.state = "dead"
+                    if not hasattr(unit, 'died_at'):
+                        unit.died_at = time.time()
+                    # Sécurité : si un attaquant local visait cette unité, on le libère
+                    for attacker in self.units:
+                        if (getattr(attacker, 'state', None) == "waiting_ownership"
+                                and getattr(attacker, 'target', None) is unit):
+                            attacker.target = None
+                            attacker.state = "idle"
+                            attacker.req_sent = False
+                            attacker.req_sent_at = None
+                elif not unit.is_alive:
+                    # On a déjà tué cette unité localement (on en avait pris la propriété).
+                    # On ignore le heartbeat du pair pour éviter que le cadavre ne bouge
+                    # tant que la mort n'a pas été propagée.
+                    pass
                 else:
                     nouvelle_pos = (int(msg.pos_x), int(msg.pos_y)) # INT ici aussi !
                     if unit.position != nouvelle_pos:
@@ -430,17 +451,34 @@ class Engine:
             print('problème')
 
     def game_loop(self):
-        view_frame_time = max(1 / 100, 2 / (self.max_fps + self.min_fps)) 
-        self.turn_time_target = 1.0 / self.tps 
+        view_frame_time = max(1 / 100, 2 / (self.max_fps + self.min_fps))
+        self.turn_time_target = 1.0 / self.tps
         max_turn_time = self.turn_time_target
 
         next_view_time = time.time()
+        last_hello = 0.0  # timestamp du dernier HELLO de découverte
 
         while self.is_running:
             turn_start = time.time()
 
             ### LECTURE RESEAU ET GESTION DECONNEXION ###
             if self.ipc:
+                # HELLO périodique : sans ça, le pair qui n'a pas lancé `./reseau <ip>`
+                # avec l'IP du voisin a un lobby vide côté C et ses messages partent
+                # dans le vide → famine de cession de propriété pour ce pair.
+                # Le HELLO traverse C, atteint le pair, qui appelle add_peer(sender)
+                # → lobby symétrique garanti après quelques secondes.
+                if turn_start - last_hello > 2.0:
+                    hello_msg = Message(
+                        id_joueur=self.player_id,
+                        pos_x=0.0, pos_y=0.0, hp=0.0,
+                        action=ActionType.HELLO,
+                        timestamp=turn_start,
+                        target_id="HELLO"
+                    )
+                    self.ipc.send_action(hello_msg)
+                    last_hello = turn_start
+
                 messages = self.ipc.get_pending_messages()
                 for msg in messages:
                     self.apply_network_message(msg)
@@ -582,24 +620,36 @@ class Engine:
         import time # Juste au cas où ce n'est pas importé en haut
         red_alive = 0
         blue_alive = 0
+        units_to_remove = []
         for unit in self.units:
             if not unit.is_alive:
-                # 4. Transmettre la mort UNE SEULE FOIS aux adversaires
-                if unit.team == self.local_team and hasattr(unit, 'unit_id'):
+                # Diffuser la mort UNE SEULE FOIS — soit pour nos propres unités,
+                # soit pour les unités adverses dont on a pris la propriété réseau
+                # (sinon le pair ne saurait jamais qu'elles sont mortes).
+                we_own = (unit.team == self.local_team
+                          or getattr(unit, 'network_owner', None) == self.player_id)
+                if we_own and hasattr(unit, 'unit_id'):
                     if unit.unit_id not in self.dead_units_sync:
                         if self.ipc:
-                            # --- MISE A JOUR FORMAT V2 ---
                             msg = Message(
-                                id_joueur=self.player_id, 
-                                pos_x=-1000.0, 
-                                pos_y=-1000.0, 
+                                id_joueur=self.player_id,
+                                pos_x=-1000.0,
+                                pos_y=-1000.0,
                                 hp=0.0,
-                                action=ActionType.MOVE, 
+                                action=ActionType.MOVE,
                                 timestamp=time.time(),
                                 target_id=str(unit.unit_id)
                             )
                             self.ipc.send_action(msg)
                         self.dead_units_sync.add(unit.unit_id)
+                        unit.died_at = time.time()
+
+                # Nettoyage : on retire l'unité de la scène 3 s après confirmation
+                # de la mort (le délai laisse au pair le temps de recevoir le MOVE
+                # de mort, et au visuel de jouer une dernière frame "dead").
+                died_at = getattr(unit, 'died_at', None)
+                if died_at and time.time() - died_at > 3.0:
+                    units_to_remove.append(unit)
                 continue
                 
             if unit.team == 'R': red_alive += 1
@@ -682,6 +732,14 @@ class Engine:
                         )
                         self.ipc.send_action(msg)
                     # -------------------------------------------------------
+
+        # Retrait effectif des morts datant de plus de 3 s
+        for u in units_to_remove:
+            if u in self.units:
+                self.units.remove(u)
+            keys_to_remove = [pos for pos, mapped in self.game_map.map.items() if mapped is u]
+            for pos in keys_to_remove:
+                self.game_map.map.pop(pos, None)
 
         if "lanchester" in self.scenario_name.lower() and self.current_turn % 10 == 0:
             self.history['turns'].append(self.current_turn)
