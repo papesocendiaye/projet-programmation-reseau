@@ -435,13 +435,14 @@ class Engine:
                 for msg in messages:
                     self.apply_network_message(msg)
                     
-                # 3. Disparition absolue des joueurs déconnectés
+               # 3. Disparition absolue des joueurs déconnectés
                 temps_actuel = time.time()
                 unites_a_supprimer = []
                 
                 for u in self.units:
                     if u.team != self.local_team and hasattr(u, 'last_seen'):
-                        if temps_actuel - u.last_seen > 2.0:
+                        # ---> CORRECTIF : On passe à 4.0 secondes de tolérance pour le Wi-Fi
+                        if temps_actuel - u.last_seen > 4.0:
                             print(f"[RESEAU] Timeout distant. Disparition complète de {u.unit_id}")
                             unites_a_supprimer.append(u)
                             
@@ -450,7 +451,7 @@ class Engine:
                     if u in self.units:
                         self.units.remove(u)
                     self.game_map.remove_unit(u.position[0], u.position[1])
-            ##############################################
+                ##############################################
 
             if self.tournaments:
                 self.process_turn()
