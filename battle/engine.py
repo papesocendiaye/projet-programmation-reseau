@@ -95,14 +95,21 @@ class Engine:
     # =================================================================
     #  Cycle de vie
     # =================================================================
-    def __init__(self, scenario, ia1, ia2, view_type, tournaments=False, local_team='R'):
+    def __init__(self, scenario, ia1, ia2, view_type, tournaments=False, local_team='R', ia3=None):
         self.scenario_name = scenario
-        self.ia1 = fix_string(ia1)
-        self.ia2 = fix_string(ia2)
+        self.ia_names = {'R': fix_string(ia1), 'B': fix_string(ia2)}
+        if ia3:
+            self.ia_names['V'] = fix_string(ia3)
+            
         self.view_type = view_type
         self.tournaments = tournaments
         self.local_team = local_team
-        self.player_id = 1 if local_team == 'R' else 2
+        
+        mapping = {'R': 1, 'B': 2, 'V': 3}
+        self.player_id = mapping.get(local_team, 4)
+        
+        self.ias = {}
+        
         self._init_state()
         self._init_timing()
         self._init_network()
@@ -226,14 +233,12 @@ class Engine:
             self.units.append(self.game_map.get_unit(x, y))
 
     def initialize_ai(self):
-        if self.ia1 not in AI_REGISTRY: raise ValueError(f"IA '{self.ia1}' non reconnue.")
-        if self.ia2 not in AI_REGISTRY: raise ValueError(f"IA '{self.ia2}' non reconnue.")
-        self.ia1 = AI_REGISTRY[self.ia1]("R", self.game_map)
-        self.ia2 = AI_REGISTRY[self.ia2]("B", self.game_map)
-        self.ia1.initialize()
-        self.ia2.initialize()
+        for team, name in self.ia_names.items():
+            if name not in AI_REGISTRY: raise ValueError(f"IA '{name}' non reconnue pour l'équipe {team}.")
+            self.ias[team] = AI_REGISTRY[name](team, self.game_map)
+            self.ias[team].initialize()
         if not self.tournaments:
-            print(f"Initializing AIs: {self.ia1.name} vs {self.ia2.name}")
+            print(f"Initializing AIs: {', '.join([ia.name for ia in self.ias.values()])}")
 
     def initialize_view(self):
         import visuals.terminal_view as term
@@ -249,14 +254,25 @@ class Engine:
         if not self.tournaments and "lanchester" in self.scenario_name.lower():
             self.rapport_lanchester()
         if not self.tournaments:
-            print("\n=== Battle Ended ===")
+            print("\n" + "="*40)
+            print("===        BATTLE ENDED          ===")
+            print("="*40)
             print(f"Total turns: {self.current_turn}")
+            print(f"Résultat final : {self.winner_state}")
+            print("\nUnités restantes par équipe :")
+            for team_code in self.ias.keys():
+                count = len([u for u in self.units if u.team == team_code and u.is_alive])
+                print(f"  - Equipe {team_code} : {count} unité(s)")
+            print("="*40 + "\n")
             return None
+            
+        ia1_name = self.ias['R'].name if 'R' in self.ias else ""
+        ia2_name = self.ias['B'].name if 'B' in self.ias else ""
         return {
             'turn': self.current_turn,
             'scenario': str(self.scenario_name),
-            'ia1': str(self.ia1.name),
-            'ia2': str(self.ia2.name),
+            'ia1': str(ia1_name),
+            'ia2': str(ia2_name),
             'units_ia1': len([u for u in self.units if u.team == 'R' and u.is_alive]),
             'units_ia2': len([u for u in self.units if u.team == 'B' and u.is_alive]),
             'real_tps': self.real_tps,
@@ -310,8 +326,13 @@ class Engine:
         self.update_units(1 / 60)
         self.update_projectiles()
         self.turn_time = time.time() - t0
-        if self.view and self.turn_time < self.turn_time_target:
-            time.sleep(self.turn_time_target - self.turn_time)
+        target = self.turn_time_target
+        if self.view and self.turn_time < target:
+            # Spin-wait hybride pour une fluidité parfaite (sans stutters)
+            while time.time() - t0 < target:
+                if target - (time.time() - t0) > 0.005:
+                    time.sleep(0.001)
+                    
         dt2 = time.time() - t0
         if dt2 != 0:
             self.tab_game_tps.append(1.0 / dt2)
@@ -327,9 +348,13 @@ class Engine:
             next_view_time = t0 + view_frame_time
             if self.view_type > 0:
                 self.update_view()
-        dt = time.time() - t0
-        if self.view and dt < self.turn_time_target:
-            time.sleep(self.turn_time_target - dt)
+        
+        target = self.turn_time_target
+        if self.view and (time.time() - t0) < target:
+            while time.time() - t0 < target:
+                if target - (time.time() - t0) > 0.005:
+                    time.sleep(0.001)
+                    
         dt2 = time.time() - t0
         if dt2 != 0:
             self.tab_game_tps.append(1.0 / dt2)
@@ -394,8 +419,9 @@ class Engine:
 
     def _play_unit_turn(self, unit):
         old_pos = unit.position
-        ia = self.ia1 if unit.team == 'R' else self.ia2
-        ia.play_turn(unit, self.current_turn)
+        ia = self.ias.get(unit.team)
+        if ia:
+            ia.play_turn(unit, self.current_turn)
 
         # ACTION centralisée : si l'IA a déclenché une attaque sur une case
         # dont on n'a pas la propriété, Map.attack2 met l'unité en
@@ -409,11 +435,13 @@ class Engine:
             else:
                 self._request_ownership(unit, unit.target)
 
-        # Heartbeat : on continue à émettre même en waiting_ownership pour
-        # ne pas se faire timeout par le pair (4 s sans nouvelles).
-        if self.ipc and (unit.position != old_pos
-                         or self.current_turn % HEARTBEAT_PERIOD_TURNS == 0):
+        # Heartbeat : on utilise SPAWN périodiquement (et non MOVE)
+        # Cela permet à une unité d'apparaître chez l'adversaire même si
+        # le paquet initial a été perdu en UDP.
+        if self.ipc and (unit.position != old_pos):
             self._send(ActionType.MOVE, unit)
+        elif self.ipc and (self.current_turn % HEARTBEAT_PERIOD_TURNS == 0):
+            self._send(ActionType.SPAWN, unit)
 
     def _broadcast_death(self, unit):
         # Diffuser une seule fois la mort d'une unité que NOUS possédons (la
@@ -461,8 +489,8 @@ class Engine:
             new_unit.network_owner = self.player_id
             self.unit_id_counter += 1
             self.units.append(new_unit)
-            self.ia1.initialize()
-            self.ia2.initialize()
+            for ia in self.ias.values():
+                ia.initialize()
             self._send(ActionType.SPAWN, new_unit)
 
     # =================================================================
@@ -556,8 +584,8 @@ class Engine:
         unit.current_hp = msg.hp
         unit.network_owner = msg.id_joueur
         self.units.append(unit)
-        self.ia1.initialize()
-        self.ia2.initialize()
+        for ia in self.ias.values():
+            ia.initialize()
         # Handshake : on ré-annonce nos unités locales en SPAWN (et plus en
         # MOVE comme avant) car les MOVE pour ID inconnus sont désormais ignorés.
         if self.ipc:
@@ -754,8 +782,8 @@ class Engine:
     def get_game_info(self):
         return {
             'turn': self.current_turn,
-            'ia1': self.ia1.name,
-            'ia2': self.ia2.name,
+            'ia1': self.ias['R'].name if 'R' in self.ias else "",
+            'ia2': self.ias['B'].name if 'B' in self.ias else "",
             'game_pause': self.game_pause,
             'units_ia1': len([u for u in self.units if u.team == 'R' and u.is_alive]),
             'units_ia2': len([u for u in self.units if u.team == 'B' and u.is_alive]),
@@ -770,16 +798,26 @@ class Engine:
         }
 
     def check_victory(self):
-        team1 = len([u for u in self.units if u.team == self.local_team and u.is_alive])
-        team2 = len([u for u in self.units if u.team != self.local_team and u.is_alive])
+        my_team = len([u for u in self.units if u.team == self.local_team and u.is_alive])
+        enemies = len([u for u in self.units if u.team != self.local_team and u.is_alive])
         if self.current_turn <= VICTORY_GRACE_TURNS:
             return  # 5 s de grâce pour la synchro réseau initiale
-        if team1 == 0 and team2 > 0:    new_state = "DEFAITE"
-        elif team2 == 0 and team1 > 0:  new_state = "VICTOIRE"
-        elif team1 > 0 and team2 > 0:   new_state = "COMBAT EN COURS"
-        else:                           new_state = "EGALITE (ARENE VIDE)"
+            
+        if my_team == 0 and enemies > 0:    new_state = "DEFAITE"
+        elif enemies == 0 and my_team > 0:  new_state = "VICTOIRE"
+        elif my_team > 0 and enemies > 0:   new_state = "COMBAT EN COURS"
+        else:                               new_state = "EGALITE (ARENE VIDE)"
+        
         if self.winner_state != new_state:
-            print(f"\n[JEU] ---> ETAT DU MATCH : {new_state} <---")
+            print("\n" + "="*40)
+            print(f"=== ETAT DU MATCH : {new_state} ===")
+            print("="*40)
+            print("Unités en vie :")
+            for team_code in self.ias.keys():
+                count = len([u for u in self.units if u.team == team_code and u.is_alive])
+                print(f"  - Equipe {team_code} : {count} survivants")
+            print("="*40 + "\n")
+            
         self.winner_state = new_state
 
     def rapport_lanchester(self):
