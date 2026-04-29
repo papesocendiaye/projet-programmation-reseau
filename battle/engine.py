@@ -323,9 +323,19 @@ class Engine:
                         def take_damage(self, attacker):
                             pass 
                     
-                    self.game_map.fire_projectile(unit, MockTarget((int(msg.pos_x), int(msg.pos_y))))
-                    unit.time_until_next_attack = unit.reload_time
+                    # 1. On DÉFINIT bien tx et ty ici :
+                    tx = int(msg.pos_x)
+                    ty = int(msg.pos_y)
+                    ux = int(unit.position[0])
+                    uy = int(unit.position[1])
                     
+                    # 2. On applique la sécurité anti-crash :
+                    if tx == ux and ty == uy:
+                        tx += 1 
+                        
+                    # 3. On tire en utilisant tx et ty (qui existent bien maintenant !)
+                    self.game_map.fire_projectile(unit, MockTarget((tx, ty)))
+                    unit.time_until_next_attack = unit.reload_time
             # --- PROTOCOLE OWNERSHIP V2 ---
             elif msg.action == ActionType.REQ_OWNERSHIP:
                 if getattr(unit, 'network_owner', self.player_id) == self.player_id:
