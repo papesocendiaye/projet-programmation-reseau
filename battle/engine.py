@@ -490,7 +490,7 @@ class Engine:
         unit.target = target
         unit.state = "waiting_ownership"
         if last is None:
-            print(f"[V2] {unit.unit_id} demande l'autorisation d'attaquer {target.unit_id}...")
+            print(f"[V2] {unit.unit_id} demande la propriété réseau de {target.unit_id}...")
             self._send_req(unit, target, now)
             return
         if now - last > REQ_ABANDON_S:
