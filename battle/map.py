@@ -55,6 +55,12 @@ class Map:
         """Permet de retirer l'unité à la position (x, y)"""
         if (x, y) in self.map:
             self.map.pop((x, y), None)
+    def remove_unit_obj(self, unit):
+        """Retire l'objet unité de la carte (indispensable pour effacer un joueur déconnecté)"""
+        keys_to_remove = [pos for pos, u in self.map.items() if u == unit]
+        for k in keys_to_remove:
+            self.map.pop(k, None)
+        
     def load_dimensions(self, scenario_name):
         """Charge uniquement les dimensions de la carte depuis un scénario"""
         size, scenario = Scenario().get_list_by_name(scenario_name)
@@ -354,12 +360,29 @@ class Map:
     def attack2(self, unit, target):
         if not unit.can_attack(target):
             return None  # Ne peut pas attaquer
+            
+        # ==========================================
+        #       V2 : GESTION PROPRIÉTÉ RÉSEAU
+        # ==========================================
+        unit_owner = getattr(unit, 'network_owner', None)
+        target_owner = getattr(target, 'network_owner', None)
+        
+        # Si la cible appartient à l'adversaire, on bloque l'attaque !
+        if unit_owner is not None and target_owner is not None:
+            if unit_owner != target_owner:
+                # On met l'unité en pause, l'engine.py va prendre le relais pour envoyer la demande
+                unit.state = "waiting_ownership"
+                unit.target = target
+                return False 
+        # ==========================================
+
         if unit.time_before_next_attack > 0:
             unit.state = "attacking"
             angle = atan2(target.position[1] - unit.position[1], target.position[0] - unit.position[0]) + 3.15
             unit.orientation = (round(angle * 8 / 6.28) + 3) % 8
             return False
-        # commence l'attaque
+            
+        # commence l'attaque (à partir d'ici, on a l'autorisation réseau !)
         unit.state = "attacking"
         unit.target = target
 
@@ -378,7 +401,6 @@ class Map:
         # set cooldown
 
         return
-
     def fire_projectile(self, shooter, target):
         type = shooter.type
 
