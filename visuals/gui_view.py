@@ -133,7 +133,7 @@ class GUI_view:
         }
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                options_return["quit"] == True
+                options_return["quit"] = True
                 pygame.quit()
                 return options_return
 
@@ -529,8 +529,19 @@ class GUI_view:
             text = self.big_font.render(battle_infos['winner_status'], 1, color)
             self.screen.blit(text, ((self.max_size[0]-text.get_size()[0])//2, (self.max_size[1]-text.get_size()[1])//2))
 
-    def display(self, map: Map, battle_infos: dict):
+    def display(self, map: Map, battle_infos: dict, units=None):
         """ Return True si il faut continuer a afficher et False si il faut quitter le gui"""
+        # Source de vérité : la liste `engine.units` quand elle est passée
+        # (toutes les unités vivantes ou récemment mortes), sinon fallback sur
+        # `map.map.values()`. La liste est préférable car `map.map` est un dict
+        # indexé par position : si deux unités convergent vers la même tuile,
+        # `maj_unit_posi` écrase l'entrée et l'unité disparait visuellement
+        # alors qu'elle est toujours vivante côté moteur.
+        if units is not None:
+            self.all_units = [u for u in units if u is not None]
+        else:
+            self.all_units = [u for u in map.map.values() if u is not None]
+
         
         # --- NOUVEAU : ACTUALISATION DE LA LISTE A CHAQUE FRAME ---
         self.all_units = []

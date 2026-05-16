@@ -360,15 +360,25 @@ class Map:
     #  Partie Projectiles et fonction attack(unit,target)  #
     ########################################################
 
+    def cell_owner(self, x, y):
+        # Propriétaire réseau d'une case = network_owner de l'unité dessus.
+        # Case vide => None (libre). Source de vérité unique pour Engine.try_action.
+        unit = self.map.get((x, y))
+        return getattr(unit, 'network_owner', None) if unit else None
+
     def attack2(self, unit, target):
+        # NB : la vérification de propriété réseau est faite EN AMONT par
+        # Engine.try_action. Ici on suppose la propriété déjà acquise.
         if not unit.can_attack(target):
             return None  # Ne peut pas attaquer
+
         if unit.time_before_next_attack > 0:
             unit.state = "attacking"
             angle = atan2(target.position[1] - unit.position[1], target.position[0] - unit.position[0]) + 3.15
             unit.orientation = (round(angle * 8 / 6.28) + 3) % 8
             return False
-        # commence l'attaque
+            
+        # commence l'attaque (à partir d'ici, on a l'autorisation réseau !)
         unit.state = "attacking"
         unit.target = target
 
@@ -387,7 +397,6 @@ class Map:
         # set cooldown
 
         return
-
     def fire_projectile(self, shooter, target):
         type = shooter.type
 

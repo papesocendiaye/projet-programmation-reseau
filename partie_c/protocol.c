@@ -1,12 +1,10 @@
 #include "protocol.h"
+#include <string.h>
 
-void serialize_message(const Message* msg, char* buffer, size_t buffer_size) {
-    snprintf(buffer, buffer_size, "%d|%d|%d|%d|%s", 
-             msg->id_joueur, msg->pos_x, msg->pos_y, (int)msg->action, msg->target_id);
+void serialize_binary(const Message* msg, char* buffer) {
+    memcpy(buffer, msg, sizeof(Message));
 }
 
-int deserialize_message(const char* str, Message* msg) {
-    int parsed = sscanf(str, "%d|%d|%d|%d|%31[^|]", 
-                        &msg->id_joueur, &msg->pos_x, &msg->pos_y, (int*)&msg->action, msg->target_id);
-    return (parsed == 5); 
+void deserialize_binary(const char* buffer, Message* msg) {
+    memcpy(msg, buffer, sizeof(Message));
 }
