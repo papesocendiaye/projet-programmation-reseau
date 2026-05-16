@@ -127,6 +127,7 @@ class Engine:
         self.spawn_interval = 0.15  # spawn une unite toutes les 150ms
         self.time_since_last_spawn = 0.0
         self.unit_id_counter = 0
+        self.net_sync = None  # initialise par init_network()
 
         ### NOUVEAU : Initialisation IPC ###
         self.local_team = local_team # 'R' ou 'B'
@@ -147,14 +148,25 @@ class Engine:
     def initialize_units(self):
         """charge la liste d'unite"""
         for (x,y) in self.game_map.map:
-            self.game_map.get_unit(x,y).direction = (0,0)
-            self.units.append(self.game_map.get_unit(x,y))
+            unit = self.game_map.get_unit(x,y)
+            unit.direction = (0,0)
+            unit.unit_id = f"{unit.team}_{unit.type}_{self.unit_id_counter}"
+            self.unit_id_counter += 1
+            self.units.append(unit)
 
     def load_scenario(self):
         """Charge le scénario depuis le fichier"""
 
         if not self.tournaments: print(f"Loading scenario: {self.scenario_name}")
         self.game_map = Map()
+        #Map.load(self.game_map, self.scenario_name)
+        if self.tournaments:
+            # Mode tournoi: chargement classique instantané
+            Map.load(self.game_map, self.scenario_name)
+        else:
+            # Mode normal: chargement progressif
+            self.game_map.load_dimensions(self.scenario_name)
+            self.build_spawn_queue()
     
         Map.load(self.game_map, self.scenario_name)
         if not self.tournaments: 
@@ -164,6 +176,73 @@ class Engine:
         """Construit la file de spawn progressive en alternant R et B"""
         from battle.scenario import Scenario
         _, scenario = Scenario().get_list_by_name(self.scenario_name)
+
+        red_units = []
+        blue_units = []
+
+        if "lanchester" in self.scenario_name:
+            for x, y, unit_type in scenario:
+                if x < self.game_map.p // 2:
+                    red_units.append((x, y, unit_type, 'R'))
+                else:
+                    blue_units.append((x, y, unit_type, 'B'))
+        else:
+            for x, y, unit_type in scenario:
+                red_units.append((x, y, unit_type, 'R'))
+                blue_units.append((self.game_map.p - x, y, unit_type, 'B'))
+
+        # Alterner R et B pour l'équité
+        self.spawn_queue = []
+        max_len = max(len(red_units), len(blue_units))
+        for i in range(max_len):
+            if i < len(red_units):
+                self.spawn_queue.append(red_units[i])
+            if i < len(blue_units):
+                self.spawn_queue.append(blue_units[i])
+
+    def process_spawns(self):
+        """Fait apparaitre les unités progressivement"""
+        if not self.spawn_queue:
+            return
+        self.time_since_last_spawn += 1.0 / 60.0
+        while self.time_since_last_spawn >= self.spawn_interval and self.spawn_queue:
+            self.time_since_last_spawn -= self.spawn_interval
+            x, y, unit_type, team = self.spawn_queue.pop(0)
+            self.game_map.add_unit(x, y, unit_type, team)
+            new_unit = self.game_map.get_unit(x, y)
+            if new_unit and new_unit not in self.units:
+                new_unit.direction = (0, 0)
+                # Assigner l'identifiant réseau unique
+                new_unit.unit_id = f"{team}_{unit_type}_{self.unit_id_counter}"
+                self.unit_id_counter += 1
+                self.units.append(new_unit)
+                self.ia1.initialize()
+                self.ia2.initialize()
+                
+                
+
+    def find_unit_by_id(self, unit_id):
+        """Trouve une unité par son identifiant réseau"""
+        for unit in self.units:
+            if unit.unit_id == unit_id:
+                return unit
+        return None
+
+    def init_network(self):
+        """Initialise la synchronisation reseau V1 (best-effort)."""
+        from battle.net_sync import NetSync
+        self.net_sync = NetSync(self)
+        print("[NET] Synchronisation reseau initialisee (V1 best-effort)")
+
+    def _net_receive(self):
+        """Recevoir les MAJ distantes si le reseau est actif."""
+        if self.net_sync:
+            self.net_sync.receive_updates()
+
+    def _net_send(self):
+        """Envoyer les changements locaux si le reseau est actif."""
+        if self.net_sync:
+            self.net_sync.send_updates()
 
         red_units = []
         blue_units = []
@@ -337,12 +416,14 @@ class Engine:
             ##############################################
 
             if self.tournaments:
+                self._net_receive()
                 self.process_turn()
                 self.process_spawns()
                 self.check_victory()
                 self.current_turn += 1
                 self.update_units(1 / 60)
                 self.update_projectiles()
+                self._net_send()
                 turn_time = time.time() - turn_start
                 if turn_time > 0:
                     self.tab_game_tps.append((1.0 / turn_time))
@@ -386,6 +467,7 @@ class Engine:
                     # 5 mets a jour les unités
                     self.update_units(1 / 60)
                     self.update_projectiles()
+                    self._net_send()
                     # 5. Contrôle du turn rate
                     self.turn_time = time.time() - turn_start
                     if self.view and self.turn_time < max_turn_time:
