@@ -16,12 +16,13 @@ from battle.engine import Engine
 # Remplacez "nom_du_scenario", "nom_ia_1" et "nom_ia_2" par les VRAIS noms 
 # qui sont dans votre AI_REGISTRY et vos fichiers de scénarios.
 if __name__ == "__main__":
-    print("--- Démarrage Joueur BLEU ---")
+    print("--- Démarrage Joueur VERT ---")
     moteur = Engine(
         scenario="stest1", # <-- METTEZ VOTRE SCENARIO ICI
         ia1="major_daft",       # <-- METTEZ VOTRE IA ROUGE ICI
         ia2="major_daft",       # <-- METTEZ VOTRE IA BLEUE ICI
         view_type=2, 
-        local_team='B'         # <-- Ce PC calcule l'équipe Bleue
+        local_team='V',        # <-- Ce PC calcule l'équipe Verte
+        ia3="major_daft"       # <-- L'IA VERTE
     )
     moteur.start()

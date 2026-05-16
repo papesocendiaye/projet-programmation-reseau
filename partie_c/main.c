@@ -68,6 +68,9 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    int broadcast_enable = 1;
+    setsockopt(sock_res, SOL_SOCKET, SO_BROADCAST, (const char*)&broadcast_enable, sizeof(broadcast_enable));
+
     printf("--- Nœud V2 (Binaire + Timestamp + HP) actif ---\n");
 
     if (argc > 1) {
@@ -95,6 +98,16 @@ int main(int argc, char *argv[]) {
             if (len == sizeof(Message)) {
                 Message m;
                 deserialize_binary(buffer, &m);
+                
+                // Si c'est un HELLO, on le broadcast sur le LAN
+                if (m.action == ACTION_HELLO) {
+                    struct sockaddr_in bcast_addr = {0};
+                    bcast_addr.sin_family = AF_INET;
+                    bcast_addr.sin_port = htons(PORT_RESEAU);
+                    bcast_addr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+                    sendto(sock_res, buffer, sizeof(Message), 0, (struct sockaddr*)&bcast_addr, sizeof(bcast_addr));
+                }
+                
                 for(int i=0; i<MAX_PEERS; i++) {
                     if(lobby[i].active) 
                         sendto(sock_res, buffer, sizeof(Message), 0, (struct sockaddr*)&lobby[i].addr, sizeof(lobby[i].addr));
