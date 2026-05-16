@@ -18,6 +18,8 @@ class IPCClient:
             pass
         self.sock.bind(("127.0.0.1", port_ecoute))
         self.sock.setblocking(False)
+        self.sock.bind(("127.0.0.1", port_ecoute))
+        self.sock.setblocking(False) 
         self.c_address = ("127.0.0.1", port_c)
 
     def send_action(self, msg: Message):
@@ -25,6 +27,8 @@ class IPCClient:
             self.sock.sendto(msg.serialize(), self.c_address)
         except Exception:
             pass # Si le C n'est pas prêt, on ignore
+        except Exception as e:
+            pass
 
     def get_pending_messages(self):
         msgs = []
@@ -42,3 +46,30 @@ class IPCClient:
             print(f"[IPC] Erreur réception : {e}")
             
         return msgs
+                # 1. NETTOYAGE VITAL : Enlève les caractères invisibles envoyés par le C (\x00, \n, etc.)
+                raw_str = data.decode('utf-8').strip('\x00').strip() 
+                
+                try:
+                    msg_obj = Message.deserialize(raw_str)
+                    if msg_obj:
+                        msgs.append(msg_obj)
+                    else:
+                        print(f"[PYTHON] ⚠️ deserialize() a retourné None pour : '{raw_str}'")
+                except Exception as e:
+                    print(f"[PYTHON] ❌ Erreur fatale de lecture du message '{raw_str}' : {e}")
+
+        except BlockingIOError:
+            pass 
+        except ConnectionResetError:
+            pass
+            
+        return msgs
+
+if __name__ == "__main__":
+    print("--- Démarrage du Test Client Python ---")
+    ipc = IPCClient()
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        ipc.sock.close()

@@ -10,6 +10,11 @@ class ActionType(IntEnum):
     REQ_OWNERSHIP = 3
     ACK_OWNERSHIP = 4
     HELLO = 5
+    DIE = 4             # Pour forcer la suppression d'une unité (ex: quand on perd la connexion, ou pour les unités contrôlées par l'adversaire qui disparaissent)
+    VICTORY = 5         # Pour annoncer la fin de la bataille (ex: quand on gagne, ou pour forcer l'adversaire à afficher sa défaite)
+    UPDATE_STATS = 6    # Pour synchroniser sur les stats d'une unité (ex: après une attaque, pour que les deux joueurs aient les mêmes infos sur la santé des unités)
+    HELLO = 4 # Ajouté pour être synchro avec le C
+    DEATH = 5 # Mort d'une unité (V1 MAJ)
 
 @dataclass
 class Message:
