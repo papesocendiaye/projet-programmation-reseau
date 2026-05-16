@@ -5,12 +5,13 @@
 
 // Énumération des actions pour la Version 2
 typedef enum { 
-    ACTION_MOVE = 0, 
-    ACTION_ATTACK = 1, 
-    ACTION_SPAWN = 2, 
-    ACTION_REQ_OWNERSHIP = 3, // Demande de propriété
-    ACTION_ACK_OWNERSHIP = 4, // Transfert de propriété + état (hp)
-    ACTION_HELLO = 5
+    ACTION_MOVE, 
+    ACTION_ATTACK, 
+    ACTION_SPAWN, 
+    ACTION_REQ_OWNERSHIP,
+    ACTION_HELLO,  // <-- NOUVEAU : Message de connexion P2P
+    ACTION_DEATH   // Mort d'une unité (V1 MAJ)
+    ACTION_HELLO 
 } ActionType;
 
 #pragma pack(push, 1) // Force l'alignement binaire sans espaces vides (VITAL pour Python)

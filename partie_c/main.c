@@ -2,9 +2,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include "protocol.h"
-#include <arpa/inet.h>
-#include <sys/select.h>
-#include <unistd.h>
+
+#ifdef _WIN32
+    #include <winsock2.h>
+    typedef int socklen_t;
+    #pragma comment(lib, "ws2_32.lib")
+#else
+    #include <unistd.h>
+    #include <arpa/inet.h>
+    #include <sys/select.h>
+#endif
 
 #define PORT_IA 5000      
 #define PORT_RESEAU 6000  
@@ -30,24 +37,38 @@ void add_peer(struct sockaddr_in addr) {
 }
 
 int main(int argc, char *argv[]) {
+#ifdef _WIN32
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        printf("Erreur fatale : Impossible d'initialiser Winsock.\n");
+        return 1;
+    }
+#endif
+
     int sock_ia = socket(AF_INET, SOCK_DGRAM, 0);
     int sock_res = socket(AF_INET, SOCK_DGRAM, 0);
 
     struct sockaddr_in addr_ia = {0}, addr_res = {0}, sender_addr;
     socklen_t addr_len = sizeof(sender_addr);
-    char buffer[sizeof(Message)];
+    char buffer[sizeof(Message) + 10]; 
 
     addr_ia.sin_family = AF_INET;
     addr_ia.sin_port = htons(PORT_IA);
     addr_ia.sin_addr.s_addr = inet_addr("127.0.0.1");
-    bind(sock_ia, (struct sockaddr*)&addr_ia, sizeof(addr_ia));
+    if (bind(sock_ia, (struct sockaddr*)&addr_ia, sizeof(addr_ia)) < 0) {
+        printf("❌ ERREUR FATALE : Impossible d'ouvrir le port %d (Peut-etre deja utilise ?)\n", PORT_IA);
+        return 1;
+    }
 
     addr_res.sin_family = AF_INET;
     addr_res.sin_port = htons(PORT_RESEAU);
-    addr_res.sin_addr.s_addr = INADDR_ANY;
-    bind(sock_res, (struct sockaddr*)&addr_res, sizeof(addr_res));
+    addr_res.sin_addr.s_addr = htonl(INADDR_ANY);
+    if (bind(sock_res, (struct sockaddr*)&addr_res, sizeof(addr_res)) < 0) {
+        printf("❌ ERREUR FATALE : Impossible d'ouvrir le port %d\n", PORT_RESEAU);
+        return 1;
+    }
 
-    printf("Nœud V2 (Binaire + Timestamp) actif.\n");
+    printf("--- Nœud V2 (Binaire + Timestamp + HP) actif ---\n");
 
     if (argc > 1) {
         struct sockaddr_in p = {0};
@@ -70,11 +91,10 @@ int main(int argc, char *argv[]) {
         select(max_fd + 1, &reads, NULL, NULL, NULL);
 
         if (FD_ISSET(sock_ia, &reads)) {
-            int len = recvfrom(sock_ia, buffer, sizeof(Message), 0, NULL, NULL);
+            int len = recvfrom(sock_ia, buffer, sizeof(buffer), 0, NULL, NULL);
             if (len == sizeof(Message)) {
                 Message m;
                 deserialize_binary(buffer, &m);
-                printf("[IA LOCALE] Action: %d recue pour %s\n", m.action, m.target_id);
                 for(int i=0; i<MAX_PEERS; i++) {
                     if(lobby[i].active) 
                         sendto(sock_res, buffer, sizeof(Message), 0, (struct sockaddr*)&lobby[i].addr, sizeof(lobby[i].addr));
@@ -83,18 +103,28 @@ int main(int argc, char *argv[]) {
         }
 
         if (FD_ISSET(sock_res, &reads)) {
-            int len = recvfrom(sock_res, buffer, sizeof(Message), 0, (struct sockaddr*)&sender_addr, &addr_len);
+            int len = recvfrom(sock_res, buffer, sizeof(buffer), 0, (struct sockaddr*)&sender_addr, &addr_len);
             if (len == sizeof(Message)) {
                 Message m;
                 deserialize_binary(buffer, &m);
-                if (m.action == ACTION_HELLO) {
-                    add_peer(sender_addr);
-                } else {
-                    printf("[RESEAU] Action: %d recue | Time: %f\n", m.action, m.timestamp);
-                    sendto(sock_ia, buffer, sizeof(Message), 0, (struct sockaddr*)&addr_ia, sizeof(addr_ia));
+                // Découverte de pair robuste : tout message entrant nous apprend
+                // l'existence de l'expéditeur (add_peer est idempotent ligne 29).
+                // Évite l'asymétrie permanente quand un HELLO initial a été perdu
+                // ou qu'un seul côté a été lancé avec <peer_ip>.
+                add_peer(sender_addr);
+
+                if (m.action != ACTION_HELLO) {
+                    // On renvoie au Python local sur le port 5001
+                    struct sockaddr_in addr_python = addr_ia;
+                    addr_python.sin_port = htons(5001);
+                    sendto(sock_ia, buffer, sizeof(Message), 0, (struct sockaddr*)&addr_python, sizeof(addr_python));
                 }
             }
         }
     }
+    
+#ifdef _WIN32
+    WSACleanup();
+#endif
     return 0;
 }
