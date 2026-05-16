@@ -74,6 +74,7 @@ class BattleCLI:
         run_parser.add_argument("--no-terminal", action="store_true", help="Launch no view")
 
         run_parser.add_argument("-d", "--datafile", help="Write data output to this file (optional)")
+        run_parser.add_argument("-n", "--network", action="store_true", help="Activer la synchro reseau V1")
 
         t = subparsers.add_parser("tournament", help="Lance un tournoi automatique")
         t.add_argument("--generals", nargs="+", default=["all"])
@@ -135,6 +136,8 @@ class BattleCLI:
         else:
             view_type = 2
         engine = Engine(args.scenario, args.ia1, args.ia2, view_type)
+        if args.network:
+            engine.init_network()
         engine.start()
 
     def cmd_load(self, args):

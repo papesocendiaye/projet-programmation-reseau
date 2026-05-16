@@ -430,6 +430,7 @@ class GUI_view:
         # Cercle de couleur pour chaque unité vivante
         for (x, y) in map.map:
             unit = map.get_unit(x, y)
+            if unit is None: continue
             if unit.is_alive: 
                 if unit.team == 'R':
                     color = 'red'
@@ -522,6 +523,11 @@ class GUI_view:
             text = self.big_font.render("PAUSE", 1, "white")
             self.screen.blit(text, ((self.max_size[0]-text.get_size()[0])//2, (self.max_size[1]-text.get_size()[1])//2))
 
+        # Affichage Victoire/Défaite
+        if "VICTOIRE" in battle_infos['winner_status'] or "DEFAITE" in battle_infos['winner_status']:
+            color = "green" if "VICTOIRE" in battle_infos['winner_status'] else "red"
+            text = self.big_font.render(battle_infos['winner_status'], 1, color)
+            self.screen.blit(text, ((self.max_size[0]-text.get_size()[0])//2, (self.max_size[1]-text.get_size()[1])//2))
 
     def display(self, map: Map, battle_infos: dict, units=None):
         """ Return True si il faut continuer a afficher et False si il faut quitter le gui"""
@@ -536,6 +542,21 @@ class GUI_view:
         else:
             self.all_units = [u for u in map.map.values() if u is not None]
 
+        
+        # --- NOUVEAU : ACTUALISATION DE LA LISTE A CHAQUE FRAME ---
+        self.all_units = []
+        for (x, y) in map.map:
+            u = map.get_unit(x, y)
+            if u is not None:
+                self.all_units.append(u)
+        # ----------------------------------------------------------
+        # if self.all_units is None:
+        #     self.all_units = []
+        #     for (x, y) in map.map:
+        #         self.all_units.append(map.get_unit(x, y))
+
+        self.all_units = [map.get_unit(x, y) for (x, y) in map.map if map.get_unit(x, y) is not None]
+        
         self.screen.fill((0,0,0))
         
         self.display_background()
