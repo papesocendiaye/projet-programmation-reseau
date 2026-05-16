@@ -13,6 +13,7 @@ typedef enum {
     ACTION_REQ_OWNERSHIP,
     ACTION_HELLO,  // <-- NOUVEAU : Message de connexion P2P
     ACTION_DEATH   // Mort d'une unité (V1 MAJ)
+    ACTION_HELLO 
 } ActionType;
 
 typedef struct {

@@ -60,6 +60,8 @@ class Map:
         size, _ = Scenario().get_list_by_name(scenario_name)
         self.p, self.q = size[0], size[1]
         
+        size, scenario = Scenario().get_list_by_name(scenario_name)
+        self.p, self.q = size
     def load(self, scenario_name):
         """"Charge une carte depuis un scénario donné ou un fichier de sauvegarde"""
 
