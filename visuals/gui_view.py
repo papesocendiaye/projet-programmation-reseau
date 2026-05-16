@@ -541,6 +541,14 @@ class GUI_view:
             self.all_units = [u for u in units if u is not None]
         else:
             self.all_units = [u for u in map.map.values() if u is not None]
+        
+        # --- NOUVEAU : ACTUALISATION DE LA LISTE A CHAQUE FRAME ---
+        self.all_units = []
+        for (x, y) in map.map:
+            u = map.get_unit(x, y)
+            if u is not None:
+                self.all_units.append(u)
+        # ----------------------------------------------------------
 
         
         # --- NOUVEAU : ACTUALISATION DE LA LISTE A CHAQUE FRAME ---
