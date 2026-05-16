@@ -63,6 +63,9 @@ class Map:
         
     def load_dimensions(self, scenario_name):
         """Charge uniquement les dimensions de la carte depuis un scénario"""
+        size, _ = Scenario().get_list_by_name(scenario_name)
+        self.p, self.q = size[0], size[1]
+        
         size, scenario = Scenario().get_list_by_name(scenario_name)
         self.p, self.q = size
     def load(self, scenario_name):

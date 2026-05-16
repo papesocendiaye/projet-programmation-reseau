@@ -539,7 +539,13 @@ class GUI_view:
             if u is not None:
                 self.all_units.append(u)
         # ----------------------------------------------------------
+        # if self.all_units is None:
+        #     self.all_units = []
+        #     for (x, y) in map.map:
+        #         self.all_units.append(map.get_unit(x, y))
 
+        self.all_units = [map.get_unit(x, y) for (x, y) in map.map if map.get_unit(x, y) is not None]
+        
         self.screen.fill((0,0,0))
         
         self.display_background()
